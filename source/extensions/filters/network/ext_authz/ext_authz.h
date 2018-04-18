@@ -90,7 +90,8 @@ public:
   void onBelowWriteBufferLowWatermark() override {}
 
   // ExtAuthz::RequestCallbacks
-  void onComplete(Filters::Common::ExtAuthz::CheckStatus status, Filters::Common::ExtAuthz::CheckResponsePtr&&) override;
+  void onComplete(Filters::Common::ExtAuthz::CheckStatus status,
+                  Filters::Common::ExtAuthz::CheckResponsePtr&&) override;
 
 private:
   enum class Status { NotStarted, Calling, Complete };

@@ -37,7 +37,6 @@ struct ConstantValues {
 
 typedef ConstSingleton<ConstantValues> Constants;
 
-
 // NOTE: We create gRPC client for each filter stack instead of a client per thread.
 // That is ok since this is unary RPC and the cost of doing this is minimal.
 class GrpcClientImpl : public Client, public ExtAuthzAsyncCallbacks {

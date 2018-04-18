@@ -40,7 +40,6 @@ public:
    * Called when a check request is complete. The resulting status is supplied.
    */
   virtual void onComplete(CheckStatus status, CheckResponsePtr&& response) PURE;
-
 };
 
 class Client {
