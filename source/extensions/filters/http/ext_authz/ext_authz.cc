@@ -116,6 +116,7 @@ void Filter::onComplete(Filters::Common::ExtAuthz::CheckStatus status,
         response_headers->insertStatus().value(std::to_string(status_code));
       }
 
+      // TODO(gsagula): try to avoid copy.
       for (const auto& header : response->http_response().headers()) {
         response_headers->addCopy(Http::LowerCaseString(header.first), header.second);
       }
@@ -123,16 +124,17 @@ void Filter::onComplete(Filters::Common::ExtAuthz::CheckStatus status,
       if (!response->http_response().body().empty()) {
         authz_response_ = std::make_unique<Buffer::OwnedImpl>(response->http_response().body());
       }
+    }
 
+    if (authz_response_.get()) {
       callbacks_->encodeHeaders(std::move(response_headers), false);
       callbacks_->encodeData(*authz_response_.get(), true);
     } else {
-      callbacks_->encodeHeaders(std::move(response_headers), false);
+      callbacks_->encodeHeaders(std::move(response_headers), true);
     }
 
     callbacks_->requestInfo().setResponseFlag(
         RequestInfo::ResponseFlag::UnauthorizedExternalService);
-
   } else {
     if (config_->failureModeAllow() && status == CheckStatus::Error) {
       // Status is Error and yet we are allowing the request. Click a counter.
@@ -140,13 +142,12 @@ void Filter::onComplete(Filters::Common::ExtAuthz::CheckStatus status,
     }
     // We can get completion inline, so only call continue if that isn't happening.
     if (!initiating_call_) {
-
       if (response->has_http_response()) {
+        // TODO(gsagula): try to avoid copy.
         for (const auto& header : response->http_response().headers()) {
           request_headers_->addCopy(Http::LowerCaseString(header.first), header.second);
         }
       }
-
       callbacks_->continueDecoding();
     }
   }
