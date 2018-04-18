@@ -112,7 +112,7 @@ void Filter::onComplete(Filters::Common::ExtAuthz::CheckStatus status,
 
     if (response->has_http_response()) {
       const uint32_t status_code = response->http_response().status_code();
-      if (status_code != enumToInt(Http::Code::Forbidden)) {
+      if (status_code && status_code != enumToInt(Http::Code::Forbidden)) {
         response_headers->insertStatus().value(std::to_string(status_code));
       }
 
