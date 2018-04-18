@@ -56,14 +56,14 @@ void GrpcClientImpl::onSuccess(
     span.setTag(Constants::get().TraceStatus, Constants::get().TraceOk);
   }
 
-  callbacks_->onComplete(status);
+  callbacks_->onComplete(status, std::move(response));
   callbacks_ = nullptr;
 }
 
 void GrpcClientImpl::onFailure(Grpc::Status::GrpcStatus status, const std::string&,
                                Tracing::Span&) {
   ASSERT(status != Grpc::Status::GrpcStatus::Ok);
-  callbacks_->onComplete(CheckStatus::Error);
+  callbacks_->onComplete(CheckStatus::Error, nullptr);
   callbacks_ = nullptr;
 }
 

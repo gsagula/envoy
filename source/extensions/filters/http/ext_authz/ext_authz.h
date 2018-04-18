@@ -11,6 +11,7 @@
 #include "envoy/runtime/runtime.h"
 #include "envoy/upstream/cluster_manager.h"
 
+#include "common/buffer/buffer_impl.h"
 #include "common/common/assert.h"
 #include "common/http/header_map_impl.h"
 
@@ -77,7 +78,7 @@ public:
   void setDecoderFilterCallbacks(Http::StreamDecoderFilterCallbacks& callbacks) override;
 
   // ExtAuthz::RequestCallbacks
-  void onComplete(Filters::Common::ExtAuthz::CheckStatus status) override;
+  void onComplete(Filters::Common::ExtAuthz::CheckStatus status, Filters::Common::ExtAuthz::CheckResponsePtr&&) override;
 
 private:
   enum class State { NotStarted, Calling, Complete };
@@ -86,10 +87,12 @@ private:
   FilterConfigSharedPtr config_;
   Filters::Common::ExtAuthz::ClientPtr client_;
   Http::StreamDecoderFilterCallbacks* callbacks_{};
+  Http::HeaderMap* request_headers_;
   State state_{State::NotStarted};
   Upstream::ClusterInfoConstSharedPtr cluster_;
   bool initiating_call_{};
   envoy::service::auth::v2alpha::CheckRequest check_request_{};
+  Buffer::OwnedImpl authz_response_{};  
 };
 
 } // namespace ExtAuthz

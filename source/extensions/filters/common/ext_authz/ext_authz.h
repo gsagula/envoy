@@ -27,6 +27,8 @@ enum class CheckStatus {
   Denied
 };
 
+typedef std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse> CheckResponsePtr;
+
 /**
  * Async callbacks used during check() calls.
  */
@@ -37,7 +39,8 @@ public:
   /**
    * Called when a check request is complete. The resulting status is supplied.
    */
-  virtual void onComplete(CheckStatus status) PURE;
+  virtual void onComplete(CheckStatus status, CheckResponsePtr&& response) PURE;
+
 };
 
 class Client {

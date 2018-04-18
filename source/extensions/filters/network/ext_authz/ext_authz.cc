@@ -56,7 +56,7 @@ void Filter::onEvent(Network::ConnectionEvent event) {
   }
 }
 
-void Filter::onComplete(Filters::Common::ExtAuthz::CheckStatus status) {
+void Filter::onComplete(Filters::Common::ExtAuthz::CheckStatus status, Filters::Common::ExtAuthz::CheckResponsePtr&&) {
   status_ = Status::Complete;
   config_->stats().active_.dec();
 

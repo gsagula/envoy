@@ -52,6 +52,7 @@ void Filter::initiateCall(const Http::HeaderMap& headers) {
 }
 
 Http::FilterHeadersStatus Filter::decodeHeaders(Http::HeaderMap& headers, bool) {
+  request_headers_ = &headers;
   initiateCall(headers);
   return state_ == State::Calling ? Http::FilterHeadersStatus::StopIteration
                                   : Http::FilterHeadersStatus::Continue;
@@ -78,9 +79,8 @@ void Filter::onDestroy() {
   }
 }
 
-void Filter::onComplete(Filters::Common::ExtAuthz::CheckStatus status) {
+void Filter::onComplete(Filters::Common::ExtAuthz::CheckStatus status, Filters::Common::ExtAuthz::CheckResponsePtr&& response) {
   ASSERT(cluster_);
-
   state_ = State::Complete;
 
   using Filters::Common::ExtAuthz::CheckStatus;
@@ -97,7 +97,7 @@ void Filter::onComplete(Filters::Common::ExtAuthz::CheckStatus status) {
     Http::CodeUtility::ResponseStatInfo info{config_->scope(),
                                              cluster_->statsScope(),
                                              EMPTY_STRING,
-                                             enumToInt(Http::Code::Forbidden),
+                                             enumToInt(Http::Code::Forbidden), // const uint32_t status_code = response->http_response().status_code();
                                              true,
                                              EMPTY_STRING,
                                              EMPTY_STRING,
@@ -112,10 +112,28 @@ void Filter::onComplete(Filters::Common::ExtAuthz::CheckStatus status) {
   // if there is an error contacting the service.
   if (status == CheckStatus::Denied ||
       (status == CheckStatus::Error && !config_->failureModeAllow())) {
-    Http::HeaderMapPtr response_headers{new Http::HeaderMapImpl(*getDeniedHeader())};
+    Http::HeaderMapPtr response_headers = std::make_unique<Http::HeaderMapImpl>(*getDeniedHeader());
+    
+    if (response->has_http_response()) {
+        const uint32_t status_code = response->http_response().status_code();
+        if (status_code != enumToInt(Http::Code::Forbidden)) {
+          response_headers->insertStatus().value(std::to_string(status_code));
+        }
+
+        for (const auto& header : response->http_response().headers()) {
+          response_headers->addCopy(Http::LowerCaseString(header.first), header.second);
+        }
+
+        // if (!response->http_response().body().empty()) {
+        //   authz_response_.add(response->http_response().body());
+        //   callbacks_->encodeData(authz_response_, true);
+        // }
+    }
+    
     callbacks_->encodeHeaders(std::move(response_headers), true);
     callbacks_->requestInfo().setResponseFlag(
         RequestInfo::ResponseFlag::UnauthorizedExternalService);
+  
   } else {
     if (config_->failureModeAllow() && status == CheckStatus::Error) {
       // Status is Error and yet we are allowing the request. Click a counter.
@@ -123,9 +141,17 @@ void Filter::onComplete(Filters::Common::ExtAuthz::CheckStatus status) {
     }
     // We can get completion inline, so only call continue if that isn't happening.
     if (!initiating_call_) {
+      
+      if (response->has_http_response()) {
+        for (const auto& header : response->http_response().headers()) {
+          request_headers_->addCopy(Http::LowerCaseString(header.first), header.second);
+        }
+      }
+      
       callbacks_->continueDecoding();
     }
   }
+
 }
 
 } // namespace ExtAuthz
