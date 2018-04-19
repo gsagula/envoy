@@ -157,7 +157,7 @@ TEST_P(HttpExtAuthzFilterParamTest, OkResponse) {
   EXPECT_CALL(filter_callbacks_.request_info_,
               setResponseFlag(Envoy::RequestInfo::ResponseFlag::UnauthorizedExternalService))
       .Times(0);
-  request_callbacks_->onComplete(Filters::Common::ExtAuthz::CheckStatus::OK);
+  request_callbacks_->onComplete(Filters::Common::ExtAuthz::CheckStatus::OK, nullptr);
 
   EXPECT_EQ(1U,
             cm_.thread_local_cluster_.cluster_.info_->stats_store_.counter("ext_authz.ok").value());
@@ -174,7 +174,7 @@ TEST_P(HttpExtAuthzFilterParamTest, ImmediateOkResponse) {
   EXPECT_CALL(*client_, check(_, _, _))
       .WillOnce(
           WithArgs<0>(Invoke([&](Filters::Common::ExtAuthz::RequestCallbacks& callbacks) -> void {
-            callbacks.onComplete(Filters::Common::ExtAuthz::CheckStatus::OK);
+            callbacks.onComplete(Filters::Common::ExtAuthz::CheckStatus::OK, nullptr);
           })));
 
   EXPECT_CALL(filter_callbacks_, continueDecoding()).Times(0);
@@ -206,7 +206,7 @@ TEST_P(HttpExtAuthzFilterParamTest, DeniedResponse) {
   EXPECT_CALL(filter_callbacks_, continueDecoding()).Times(0);
   EXPECT_CALL(filter_callbacks_.request_info_,
               setResponseFlag(Envoy::RequestInfo::ResponseFlag::UnauthorizedExternalService));
-  request_callbacks_->onComplete(Filters::Common::ExtAuthz::CheckStatus::Denied);
+  request_callbacks_->onComplete(Filters::Common::ExtAuthz::CheckStatus::Denied, nullptr);
 
   EXPECT_EQ(
       1U,
@@ -279,7 +279,7 @@ TEST_F(HttpExtAuthzFilterTest, ErrorFailClose) {
   EXPECT_EQ(Http::FilterHeadersStatus::StopIteration,
             filter_->decodeHeaders(request_headers_, false));
   EXPECT_CALL(filter_callbacks_, continueDecoding()).Times(0);
-  request_callbacks_->onComplete(Filters::Common::ExtAuthz::CheckStatus::Error);
+  request_callbacks_->onComplete(Filters::Common::ExtAuthz::CheckStatus::Error, nullptr);
 
   EXPECT_EQ(
       1U,
@@ -304,7 +304,7 @@ TEST_F(HttpExtAuthzFilterTest, ErrorOpen) {
   EXPECT_EQ(Http::FilterHeadersStatus::StopIteration,
             filter_->decodeHeaders(request_headers_, false));
   EXPECT_CALL(filter_callbacks_, continueDecoding());
-  request_callbacks_->onComplete(Filters::Common::ExtAuthz::CheckStatus::Error);
+  request_callbacks_->onComplete(Filters::Common::ExtAuthz::CheckStatus::Error, nullptr);
 
   EXPECT_EQ(
       1U,
@@ -323,7 +323,7 @@ TEST_F(HttpExtAuthzFilterTest, ImmediateErrorOpen) {
   EXPECT_CALL(*client_, check(_, _, _))
       .WillOnce(
           WithArgs<0>(Invoke([&](Filters::Common::ExtAuthz::RequestCallbacks& callbacks) -> void {
-            callbacks.onComplete(Filters::Common::ExtAuthz::CheckStatus::Error);
+            callbacks.onComplete(Filters::Common::ExtAuthz::CheckStatus::Error, nullptr);
           })));
 
   EXPECT_CALL(filter_callbacks_, continueDecoding()).Times(0);

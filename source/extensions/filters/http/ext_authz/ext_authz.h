@@ -93,7 +93,8 @@ private:
   Upstream::ClusterInfoConstSharedPtr cluster_;
   bool initiating_call_{};
   envoy::service::auth::v2alpha::CheckRequest check_request_{};
-  Buffer::InstancePtr authz_response_;
+  Buffer::InstancePtr response_body_;
+  Http::HeaderMapPtr response_headers_;
 };
 
 } // namespace ExtAuthz

@@ -104,33 +104,32 @@ void Filter::onComplete(Filters::Common::ExtAuthz::CheckStatus status,
     break;
   }
 
+  const bool isHttpResponse = (response && response->has_http_response());
+
   // We fail open/fail close based of filter config
   // if there is an error contacting the service.
   if (status == CheckStatus::Denied ||
       (status == CheckStatus::Error && !config_->failureModeAllow())) {
-    Http::HeaderMapPtr response_headers = std::make_unique<Http::HeaderMapImpl>(*getDeniedHeader());
+    Http::HeaderMapPtr response_headers_ = std::make_unique<Http::HeaderMapImpl>(*getDeniedHeader());
 
-    if (response->has_http_response()) {
+    if (isHttpResponse) {
       const uint32_t status_code = response->http_response().status_code();
       if (status_code && status_code != enumToInt(Http::Code::Forbidden)) {
-        response_headers->insertStatus().value(std::to_string(status_code));
+        response_headers_->insertStatus().value(std::to_string(status_code));
       }
 
-      // TODO(gsagula): try to avoid copy.
+      // TODO(gsagula): try to avoid copying it somehow.
       for (const auto& header : response->http_response().headers()) {
-        response_headers->addCopy(Http::LowerCaseString(header.first), header.second);
-      }
-
-      if (!response->http_response().body().empty()) {
-        authz_response_ = std::make_unique<Buffer::OwnedImpl>(response->http_response().body());
+        response_headers_->addCopy(Http::LowerCaseString(header.first), header.second);
       }
     }
 
-    if (authz_response_.get()) {
-      callbacks_->encodeHeaders(std::move(response_headers), false);
-      callbacks_->encodeData(*authz_response_.get(), true);
+    if (!response->http_response().body().empty()) {
+      response_body_ = std::make_unique<Buffer::OwnedImpl>(response->http_response().body());
+      callbacks_->encodeHeaders(std::move(response_headers_), false);
+      callbacks_->encodeData(*response_body_.get(), true);
     } else {
-      callbacks_->encodeHeaders(std::move(response_headers), true);
+      callbacks_->encodeHeaders(std::move(response_headers_), true);
     }
 
     callbacks_->requestInfo().setResponseFlag(
@@ -142,12 +141,14 @@ void Filter::onComplete(Filters::Common::ExtAuthz::CheckStatus status,
     }
     // We can get completion inline, so only call continue if that isn't happening.
     if (!initiating_call_) {
-      if (response->has_http_response()) {
-        // TODO(gsagula): try to avoid copy.
+      
+      if (isHttpResponse && status == CheckStatus::OK) {
+        // TODO(gsagula): try to avoid copying it somehow.
         for (const auto& header : response->http_response().headers()) {
           request_headers_->addCopy(Http::LowerCaseString(header.first), header.second);
         }
       }
+      
       callbacks_->continueDecoding();
     }
   }
