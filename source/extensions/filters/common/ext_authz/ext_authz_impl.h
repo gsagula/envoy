@@ -16,6 +16,10 @@
 #include "envoy/tracing/http_tracer.h"
 #include "envoy/upstream/cluster_manager.h"
 
+#include "common/buffer/buffer_impl.h"
+#include "common/common/enum_to_int.h"
+#include "common/http/codes.h"
+#include "common/http/header_map_impl.h"
 #include "common/singleton/const_singleton.h"
 
 #include "extensions/filters/common/ext_authz/ext_authz.h"
@@ -111,6 +115,32 @@ private:
                                     const Envoy::Http::HeaderMap& headers);
   static std::string getHeaderStr(const Envoy::Http::HeaderEntry* entry);
   static Envoy::Http::HeaderMap::Iterate fillHttpHeaders(const Envoy::Http::HeaderEntry&, void*);
+};
+
+class GrpcResponseImpl : public Response {
+public:
+  explicit GrpcResponseImpl(
+      const std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>& authz_response);
+  ~GrpcResponseImpl() {}
+
+  CheckStatus status() override { return status_; }
+
+  const HeaderKeyValuePair& headers() override { return headers_; }
+
+  Buffer::Instance& body() override { return *body_.get(); }
+
+private:
+  CheckStatus
+  setStatus(const std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>& authz_response);
+  HeaderKeyValuePair
+  setHeaders(const std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>& authz_response);
+  Buffer::InstancePtr
+  setBody(const std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>& authz_response);
+
+  bool has_http_response_{false};
+  CheckStatus status_{CheckStatus::Error};
+  HeaderKeyValuePair headers_;
+  Buffer::InstancePtr body_;
 };
 
 } // namespace ExtAuthz

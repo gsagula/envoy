@@ -25,6 +25,17 @@ public:
                            Tracing::Span& parent_span));
 };
 
+class MockResponse : public Response {
+public:
+  MockResponse();
+  ~MockResponse();
+
+  // ExtAuthz::Response
+  MOCK_METHOD0(status, CheckStatus());
+  MOCK_METHOD0(headers, const HeaderKeyValuePair&());
+  MOCK_METHOD0(body, Buffer::Instance&());
+};
+
 } // namespace ExtAuthz
 } // namespace Common
 } // namespace Filters

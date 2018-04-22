@@ -27,7 +27,35 @@ enum class CheckStatus {
   Denied
 };
 
-typedef std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse> CheckResponsePtr;
+typedef std::vector<std::pair<Http::LowerCaseString, std::string>> HeaderKeyValuePair;
+
+/**
+ * Comments ..
+ */
+class Response {
+public:
+  /**
+   * Comments ..
+   */ 
+  virtual ~Response() {}
+
+  /**
+   * Comments ..
+   */ 
+  virtual CheckStatus status() PURE;
+
+  /**
+   * Comments ..
+   */ 
+  virtual const HeaderKeyValuePair& headers() PURE;
+
+  /**
+   * Comments ..
+   */ 
+  virtual Buffer::Instance& body() PURE;
+};
+
+typedef std::unique_ptr<Response> ResponsePtr;
 
 /**
  * Async callbacks used during check() calls.
@@ -37,9 +65,14 @@ public:
   virtual ~RequestCallbacks() {}
 
   /**
+   * Called when a check request is complete. The resulting ResponsePtr is supplied.
+   */
+  virtual void onComplete(ResponsePtr&& response) PURE;
+
+  /**
    * Called when a check request is complete. The resulting status is supplied.
    */
-  virtual void onComplete(CheckStatus status, CheckResponsePtr&& response) PURE;
+  virtual void onComplete(CheckStatus status) PURE;
 };
 
 class Client {

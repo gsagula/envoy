@@ -21,6 +21,12 @@ namespace Filters {
 namespace Common {
 namespace ExtAuthz {
 
+namespace {
+const std::string& deniedHeaderValue() {
+  CONSTRUCT_ON_FIRST_USE(std::string, std::to_string(enumToInt(Http::Code::Forbidden)));
+}
+} // namespace
+
 GrpcClientImpl::GrpcClientImpl(Grpc::AsyncClientPtr&& async_client,
                                const absl::optional<std::chrono::milliseconds>& timeout)
     : service_method_(*Protobuf::DescriptorPool::generated_pool()->FindMethodByName(
@@ -47,23 +53,23 @@ void GrpcClientImpl::check(RequestCallbacks& callbacks,
 
 void GrpcClientImpl::onSuccess(
     std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>&& response, Tracing::Span& span) {
-  CheckStatus status = CheckStatus::OK;
+
   ASSERT(response->status().code() != Grpc::Status::GrpcStatus::Unknown);
   if (response->status().code() != Grpc::Status::GrpcStatus::Ok) {
-    status = CheckStatus::Denied;
     span.setTag(Constants::get().TraceStatus, Constants::get().TraceUnauthz);
   } else {
     span.setTag(Constants::get().TraceStatus, Constants::get().TraceOk);
   }
 
-  callbacks_->onComplete(status, std::move(response));
+  callbacks_->onComplete(std::make_unique<GrpcResponseImpl>(
+      std::forward<std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>>(response)));
   callbacks_ = nullptr;
 }
 
 void GrpcClientImpl::onFailure(Grpc::Status::GrpcStatus status, const std::string&,
                                Tracing::Span&) {
   ASSERT(status != Grpc::Status::GrpcStatus::Ok);
-  callbacks_->onComplete(CheckStatus::Error, nullptr);
+  callbacks_->onComplete(CheckStatus::Error);
   callbacks_ = nullptr;
 }
 
@@ -189,6 +195,45 @@ void CheckRequestUtils::createTcpCheck(const Network::ReadFilterCallbacks* callb
   Network::ReadFilterCallbacks* cb = const_cast<Network::ReadFilterCallbacks*>(callbacks);
   setAttrContextPeer(*attrs->mutable_source(), cb->connection(), "", false);
   setAttrContextPeer(*attrs->mutable_destination(), cb->connection(), "", true);
+}
+
+GrpcResponseImpl::GrpcResponseImpl(
+    const std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>& authz_response)
+    : has_http_response_{authz_response->has_http_response()}, status_{setStatus(authz_response)},
+      headers_{setHeaders(authz_response)}, body_{setBody(authz_response)} {}
+
+CheckStatus GrpcResponseImpl::setStatus(
+    const std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>& authz_response) {
+  switch (authz_response->status().code()) {
+  case Grpc::Status::GrpcStatus::Ok:
+    return CheckStatus::OK;
+  case Grpc::Status::GrpcStatus::Unknown:
+    return CheckStatus::Error;
+  default:
+    return CheckStatus::Denied;
+  }
+}
+
+HeaderKeyValuePair GrpcResponseImpl::setHeaders(
+    const std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>& authz_response) {
+  HeaderKeyValuePair headers;
+  if (has_http_response_) {
+    headers.reserve(authz_response->http_response().headers().size() + 1);
+    for (const auto& header : authz_response->http_response().headers()) {
+      headers.emplace_back(std::make_pair(Http::LowerCaseString(header.first), header.second));
+    }
+    if (status_ != CheckStatus::OK) {
+      headers.emplace_back(std::make_pair(Http::Headers::get().Status, deniedHeaderValue()));
+    }
+  }
+  return headers;
+}
+
+Buffer::InstancePtr GrpcResponseImpl::setBody(
+    const std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>& authz_response) {
+  return has_http_response_
+             ? std::make_unique<Buffer::OwnedImpl>(authz_response->http_response().body())
+             : nullptr;
 }
 
 } // namespace ExtAuthz
