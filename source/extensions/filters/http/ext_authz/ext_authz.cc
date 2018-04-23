@@ -19,6 +19,14 @@ namespace Extensions {
 namespace HttpFilters {
 namespace ExtAuthz {
 
+namespace {
+const Http::HeaderMap* getDeniedHeader() {
+  static const Http::HeaderMap* header_map = new Http::HeaderMapImpl{
+      {Http::Headers::get().Status, std::to_string(enumToInt(Http::Code::Forbidden))}};
+  return header_map;
+}
+} // namespace
+
 void Filter::initiateCall(const Http::HeaderMap& headers) {
   Router::RouteConstSharedPtr route = callbacks_->route();
   if (route == nullptr || route->routeEntry() == nullptr) {
@@ -75,9 +83,10 @@ void Filter::onComplete(Filters::Common::ExtAuthz::ResponsePtr&& response) {
 
   using Filters::Common::ExtAuthz::CheckStatus;
 
-  CheckStatus status = response->status();
+  const bool update_status_code = response->status_code >= enumToInt(Http::Code::Continue) &&
+                                  response->status_code != enumToInt(Http::Code::Forbidden);
 
-  switch (status) {
+  switch (response->status) {
   case CheckStatus::OK:
     cluster_->statsScope().counter("ext_authz.ok").inc();
     break;
@@ -87,37 +96,55 @@ void Filter::onComplete(Filters::Common::ExtAuthz::ResponsePtr&& response) {
   case CheckStatus::Denied:
     cluster_->statsScope().counter("ext_authz.denied").inc();
     Http::CodeUtility::ResponseStatInfo info{
-        config_->scope(), cluster_->statsScope(), EMPTY_STRING,
-        enumToInt(Http::Code::Forbidden), // const uint32_t status_code =
-                                          // response->http_response().status_code();
-        true, EMPTY_STRING, EMPTY_STRING, EMPTY_STRING, EMPTY_STRING, false};
+        config_->scope(),
+        cluster_->statsScope(),
+        EMPTY_STRING,
+        (update_status_code ? response->status_code : enumToInt(Http::Code::Forbidden)),
+        true,
+        EMPTY_STRING,
+        EMPTY_STRING,
+        EMPTY_STRING,
+        EMPTY_STRING,
+        false};
     Http::CodeUtility::chargeResponseStat(info);
     break;
   }
 
   // We fail open/fail close based of filter config
   // if there is an error contacting the service.
-  if (status == CheckStatus::Denied ||
-      (status == CheckStatus::Error && !config_->failureModeAllow())) {
-    Http::HeaderMapPtr failure_headers = std::make_unique<Http::HeaderMapImpl>();
-    for (const auto& header : response->headers()) {
-      failure_headers->setReferenceKey(header.first, header.second);
+  if (response->status == CheckStatus::Denied ||
+      (response->status == CheckStatus::Error && !config_->failureModeAllow())) {
+    Http::HeaderMapPtr response_headers;
+    if (update_status_code) {
+      response_headers = std::make_unique<Http::HeaderMapImpl>(Http::HeaderMapImpl{
+          {Http::Headers::get().Status, std::to_string(response->status_code)}});
+    } else {
+      response_headers = std::make_unique<Http::HeaderMapImpl>(*getDeniedHeader());
     }
 
-    callbacks_->encodeHeaders(std::move(failure_headers), false);
-    callbacks_->encodeData(response->body(), true);
+    for (const auto& header : response->headers) {
+      response_headers->setReferenceKey(header.first, header.second);
+    }
+    
+    if (response->body) {
+      callbacks_->encodeHeaders(std::move(response_headers), false);
+      callbacks_->encodeData(*response->body.get(), true);
+    } else {
+      callbacks_->encodeHeaders(std::move(response_headers), true);
+    }
+
     callbacks_->requestInfo().setResponseFlag(
         RequestInfo::ResponseFlag::UnauthorizedExternalService);
   } else {
-    if (config_->failureModeAllow() && status == CheckStatus::Error) {
+    if (config_->failureModeAllow() && response->status == CheckStatus::Error) {
       // Status is Error and yet we are allowing the request. Click a counter.
       cluster_->statsScope().counter("ext_authz.failure_mode_allowed").inc();
     }
 
     // We can get completion inline, so only call continue if that isn't happening.
     if (!initiating_call_) {
-      if (status == CheckStatus::OK) {
-        for (const auto& header : response->headers()) {
+      if (response->status == CheckStatus::OK) {
+        for (const auto& header : response->headers) {
           request_headers_->setReferenceKey(header.first, header.second);
         }
       }

@@ -9,9 +9,6 @@ namespace ExtAuthz {
 MockClient::MockClient() {}
 MockClient::~MockClient() {}
 
-MockResponse::MockResponse() {}
-MockResponse::~MockResponse() {}
-
 } // namespace ExtAuthz
 } // namespace Common
 } // namespace Filters

@@ -79,7 +79,6 @@ public:
 
   // ExtAuthz::RequestCallbacks
   void onComplete(Filters::Common::ExtAuthz::ResponsePtr&&) override;
-  void onComplete(Filters::Common::ExtAuthz::CheckStatus) override { NOT_IMPLEMENTED; }
 
 private:
   enum class State { NotStarted, Calling, Complete };

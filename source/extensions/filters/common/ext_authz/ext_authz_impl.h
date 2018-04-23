@@ -117,32 +117,6 @@ private:
   static Envoy::Http::HeaderMap::Iterate fillHttpHeaders(const Envoy::Http::HeaderEntry&, void*);
 };
 
-class GrpcResponseImpl : public Response {
-public:
-  explicit GrpcResponseImpl(
-      const std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>& authz_response);
-  ~GrpcResponseImpl() {}
-
-  CheckStatus status() override { return status_; }
-
-  const HeaderKeyValuePair& headers() override { return headers_; }
-
-  Buffer::Instance& body() override { return *body_.get(); }
-
-private:
-  CheckStatus
-  setStatus(const std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>& authz_response);
-  HeaderKeyValuePair
-  setHeaders(const std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>& authz_response);
-  Buffer::InstancePtr
-  setBody(const std::unique_ptr<envoy::service::auth::v2alpha::CheckResponse>& authz_response);
-
-  bool has_http_response_{false};
-  CheckStatus status_{CheckStatus::Error};
-  HeaderKeyValuePair headers_;
-  Buffer::InstancePtr body_;
-};
-
 } // namespace ExtAuthz
 } // namespace Common
 } // namespace Filters

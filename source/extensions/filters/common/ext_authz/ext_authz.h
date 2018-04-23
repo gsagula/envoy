@@ -27,32 +27,20 @@ enum class CheckStatus {
   Denied
 };
 
-typedef std::vector<std::pair<Http::LowerCaseString, std::string>> HeaderKeyValuePair;
+typedef std::vector<std::pair<Http::LowerCaseString, std::string>> KeyValueHeaders;
 
 /**
  * Comments ..
  */
-class Response {
-public:
-  /**
-   * Comments ..
-   */ 
-  virtual ~Response() {}
-
-  /**
-   * Comments ..
-   */ 
-  virtual CheckStatus status() PURE;
-
-  /**
-   * Comments ..
-   */ 
-  virtual const HeaderKeyValuePair& headers() PURE;
-
-  /**
-   * Comments ..
-   */ 
-  virtual Buffer::Instance& body() PURE;
+struct Response {
+  // comments ..
+  CheckStatus status;
+  // comments ..
+  KeyValueHeaders headers;
+  // comments ..
+  Buffer::InstancePtr body;
+  // comments..
+  uint32_t status_code;
 };
 
 typedef std::unique_ptr<Response> ResponsePtr;
@@ -68,11 +56,6 @@ public:
    * Called when a check request is complete. The resulting ResponsePtr is supplied.
    */
   virtual void onComplete(ResponsePtr&& response) PURE;
-
-  /**
-   * Called when a check request is complete. The resulting status is supplied.
-   */
-  virtual void onComplete(CheckStatus status) PURE;
 };
 
 class Client {
