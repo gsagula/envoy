@@ -13,12 +13,10 @@ public:
   virtual ~Decompressor() {}
 
   /**
-   * Decompresses data from one buffer into another buffer.
+   * Expands the compressed data in a buffer.
    * @param input_buffer supplies the buffer with compressed data.
-   * @param output_buffer supplies the buffer to output decompressed data.
    */
-  virtual void decompress(const Buffer::Instance& input_buffer,
-                          Buffer::Instance& output_buffer) PURE;
+  virtual void decompress(Buffer::Instance& input_buffer) PURE;
 };
 
 } // namespace Decompressor

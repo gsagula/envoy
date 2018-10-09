@@ -1,7 +1,5 @@
 #include "extensions/filters/http/gzip/gzip_filter.h"
 
-#include "envoy/stats/scope.h"
-
 #include "common/common/macros.h"
 
 #include "absl/strings/str_cat.h"
@@ -103,7 +101,10 @@ uint64_t GzipFilterConfig::windowBitsUint(Protobuf::uint32 window_bits) {
 }
 
 GzipFilter::GzipFilter(const GzipFilterConfigSharedPtr& config)
-    : skip_compression_{true}, compressed_data_(), compressor_(), config_(config) {}
+    : skip_decompression_{true}, 
+      skip_compression_{true}, 
+      skip_request_compression_{true}, compressed_data_(), compressor_(), config_(config) {}
+
 
 Http::FilterHeadersStatus GzipFilter::decodeHeaders(Http::HeaderMap& headers, bool) {
   if (config_->runtime().snapshot().featureEnabled("gzip.filter_enabled", 100) &&
@@ -116,7 +117,54 @@ Http::FilterHeadersStatus GzipFilter::decodeHeaders(Http::HeaderMap& headers, bo
     config_->stats().not_compressed_.inc();
   }
 
+  const bool compress_request{true};
+
+  if (!compress_request && isGzipEncoding(headers) && !(isMinimumContentLength(headers) &&
+      isContentTypeAllowed(headers) && hasCacheControlNoTransform(headers))) {
+    decompressor_.init(config_->windowBits());
+    request_headers_ = &headers;
+    skip_decompression_ = false;
+    return Http::FilterHeadersStatus::StopIteration;
+  } else {
+    config_->stats().not_decompressed_.inc();
+  }
+
+  if (compress_request && isMinimumContentLength(headers) && isContentTypeAllowed(headers) 
+        && !hasCacheControlNoTransform(headers) && isEtagAllowed(headers) && isTransferEncodingAllowed(headers) 
+        && !headers.ContentEncoding()) {
+    skip_request_compression_ = false;
+    sanitizeEtagHeader(headers);
+    insertVaryHeader(headers);
+    headers.removeContentLength();
+    headers.insertContentEncoding().value(Http::Headers::get().ContentEncodingValues.Gzip);
+    compressor_.init(config_->compressionLevel(), config_->compressionStrategy(),
+                     config_->windowBits(), config_->memoryLevel());
+    config_->stats().compressed_.inc();
+  } else {
+    config_->stats().not_decompressed_.inc();
+  }
+
   return Http::FilterHeadersStatus::Continue;
+}
+
+Http::FilterDataStatus GzipFilter::decodeData(Buffer::Instance& data, bool end_stream) {
+    if (!end_stream && !skip_decompression_) {
+      config_->stats().total_not_expanded_bytes_.add(data.length());
+      decompressor_.decompress(data);
+      if (!decompressor_.isError()) {
+        request_headers_->removeContentLength();
+        request_headers_->removeContentEncoding();
+        config_->stats().total_expanded_bytes_.add(data.length());
+      }
+    }
+
+    if (!end_stream && !skip_request_compression_) {
+      config_->stats().total_uncompressed_bytes_.add(data.length());
+      compressor_.compress(data, end_stream ? Compressor::State::Finish : Compressor::State::Flush);
+      config_->stats().total_compressed_bytes_.add(data.length());
+    }
+
+    return Http::FilterDataStatus::Continue;
 }
 
 Http::FilterHeadersStatus GzipFilter::encodeHeaders(Http::HeaderMap& headers, bool end_stream) {
@@ -144,6 +192,16 @@ Http::FilterDataStatus GzipFilter::encodeData(Buffer::Instance& data, bool end_s
     config_->stats().total_compressed_bytes_.add(data.length());
   }
   return Http::FilterDataStatus::Continue;
+}
+
+bool GzipFilter::isGzipEncoding(Http::HeaderMap& headers) const {
+  const Http::HeaderEntry* content_encoding = headers.ContentEncoding();
+  if (content_encoding) {
+    return StringUtil::caseFindToken(content_encoding->value().c_str(), ",",
+                                     Http::Headers::get().ContentEncodingValues.Gzip.c_str());
+  }
+
+  return false;
 }
 
 bool GzipFilter::hasCacheControlNoTransform(Http::HeaderMap& headers) const {

@@ -20,6 +20,7 @@ envoy_cc_library(
         "//include/envoy/json:json_object_interface",
         "//include/envoy/runtime:runtime_interface",
         "//source/common/buffer:buffer_lib",
+        "//source/common/decompressor:decompressor_lib",
         "//source/common/compressor:compressor_lib",
         "//source/common/http:header_map_lib",
         "//source/common/http:headers_lib",

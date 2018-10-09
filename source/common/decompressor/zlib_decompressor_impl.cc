@@ -2,6 +2,7 @@
 
 #include "envoy/common/exception.h"
 
+#include "common/buffer/buffer_impl.h"
 #include "common/common/assert.h"
 
 namespace Envoy {
@@ -10,7 +11,7 @@ namespace Decompressor {
 ZlibDecompressorImpl::ZlibDecompressorImpl() : ZlibDecompressorImpl(4096) {}
 
 ZlibDecompressorImpl::ZlibDecompressorImpl(uint64_t chunk_size)
-    : chunk_size_{chunk_size}, initialized_{false}, chunk_char_ptr_(new unsigned char[chunk_size]),
+    : chunk_size_{chunk_size}, initialized_{false}, is_error_{false}, chunk_char_ptr_(new unsigned char[chunk_size]),
       zstream_ptr_(new z_stream(), [](z_stream* z) {
         inflateEnd(z);
         delete z;
@@ -31,30 +32,41 @@ void ZlibDecompressorImpl::init(int64_t window_bits) {
 
 uint64_t ZlibDecompressorImpl::checksum() { return zstream_ptr_->adler; }
 
-void ZlibDecompressorImpl::decompress(const Buffer::Instance& input_buffer,
-                                      Buffer::Instance& output_buffer) {
-  const uint64_t num_slices = input_buffer.getRawSlices(nullptr, 0);
+
+// We should replace the data only if there was no error durring decompression.
+void ZlibDecompressorImpl::decompress(Buffer::Instance& buffer) {
+  const uint64_t num_slices = buffer.getRawSlices(nullptr, 0);
   Buffer::RawSlice slices[num_slices];
-  input_buffer.getRawSlices(slices, num_slices);
+  buffer.getRawSlices(slices, num_slices);
+  Buffer::OwnedImpl deflate_buffer{};
 
   for (const Buffer::RawSlice& input_slice : slices) {
     zstream_ptr_->avail_in = input_slice.len_;
     zstream_ptr_->next_in = static_cast<Bytef*>(input_slice.mem_);
-    while (inflateNext()) {
+    while (inflateNext() && !is_error_) {
       if (zstream_ptr_->avail_out == 0) {
-        output_buffer.add(static_cast<void*>(chunk_char_ptr_.get()),
-                          chunk_size_ - zstream_ptr_->avail_out);
+        deflate_buffer.add(static_cast<void*>(chunk_char_ptr_.get()), chunk_size_ - zstream_ptr_->avail_out);
         chunk_char_ptr_.reset(new unsigned char[chunk_size_]);
         zstream_ptr_->avail_out = chunk_size_;
         zstream_ptr_->next_out = chunk_char_ptr_.get();
       }
     }
+    
   }
 
   const uint64_t n_output{chunk_size_ - zstream_ptr_->avail_out};
-  if (n_output > 0) {
-    output_buffer.add(static_cast<void*>(chunk_char_ptr_.get()), n_output);
+  if (n_output > 0 && !is_error_) {
+    deflate_buffer.add(static_cast<void*>(chunk_char_ptr_.get()), n_output);
   }
+
+  if (!is_error_) {
+    buffer.drain(buffer.length());
+    buffer.move(deflate_buffer);
+  }
+}
+
+bool ZlibDecompressorImpl::isError() {
+  return is_error_;
 }
 
 bool ZlibDecompressorImpl::inflateNext() {
@@ -70,7 +82,9 @@ bool ZlibDecompressorImpl::inflateNext() {
     return false; // This means that zlib needs more input, so stop here.
   }
 
-  RELEASE_ASSERT(result == Z_OK, "");
+  std::cout << "AVAIL IN: " << zstream_ptr_->avail_in << std::endl;
+  std::cout << "ERROR: " << result << std::endl;
+  is_error_ = result != Z_OK;
   return true;
 }
 

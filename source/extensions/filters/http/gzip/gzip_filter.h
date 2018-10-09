@@ -5,10 +5,10 @@
 #include "envoy/http/header_map.h"
 #include "envoy/json/json_object.h"
 #include "envoy/runtime/runtime.h"
-#include "envoy/stats/scope.h"
 #include "envoy/stats/stats_macros.h"
 
 #include "common/buffer/buffer_impl.h"
+#include "common/decompressor/zlib_decompressor_impl.h"
 #include "common/compressor/zlib_compressor_impl.h"
 #include "common/http/header_map_impl.h"
 #include "common/json/config_schemas.h"
@@ -33,7 +33,9 @@ namespace Gzip {
 // clang-format off
 #define ALL_GZIP_STATS(COUNTER)    \
   COUNTER(compressed)              \
+  COUNTER(decompressed)            \
   COUNTER(not_compressed)          \
+  COUNTER(not_decompressed)        \
   COUNTER(no_accept_header)        \
   COUNTER(header_identity)         \
   COUNTER(header_gzip)             \
@@ -41,6 +43,8 @@ namespace Gzip {
   COUNTER(header_not_valid)        \
   COUNTER(total_uncompressed_bytes)\
   COUNTER(total_compressed_bytes)  \
+  COUNTER(total_not_expanded_bytes)  \
+  COUNTER(total_expanded_bytes)  \
   COUNTER(content_length_too_small)\
   COUNTER(not_compressed_etag)     \
 // clang-format on
@@ -121,9 +125,7 @@ public:
 
   // Http::StreamDecoderFilter
   Http::FilterHeadersStatus decodeHeaders(Http::HeaderMap& headers, bool end_stream) override;
-  Http::FilterDataStatus decodeData(Buffer::Instance&, bool) override {
-    return Http::FilterDataStatus::Continue;
-  }
+  Http::FilterDataStatus decodeData(Buffer::Instance&, bool) override;
   Http::FilterTrailersStatus decodeTrailers(Http::HeaderMap&) override {
     return Http::FilterTrailersStatus::Continue;
   }
@@ -149,6 +151,7 @@ private:
   // the logic in these private member functions would be availale in another class.
   friend class GzipFilterTest;
 
+  bool isGzipEncoding(Http::HeaderMap& headers) const;
   bool hasCacheControlNoTransform(Http::HeaderMap& headers) const;
   bool isAcceptEncodingAllowed(Http::HeaderMap& headers) const;
   bool isContentTypeAllowed(Http::HeaderMap& headers) const;
@@ -159,11 +162,15 @@ private:
   void sanitizeEtagHeader(Http::HeaderMap& headers);
   void insertVaryHeader(Http::HeaderMap& headers);
 
+  bool skip_decompression_;
   bool skip_compression_;
+  bool skip_request_compression_;
   Buffer::OwnedImpl compressed_data_;
   Compressor::ZlibCompressorImpl compressor_;
+  Decompressor::ZlibDecompressorImpl decompressor_;
   GzipFilterConfigSharedPtr config_;
 
+  Http::HeaderMap* request_headers_;
   Http::StreamDecoderFilterCallbacks* decoder_callbacks_{nullptr};
   Http::StreamEncoderFilterCallbacks* encoder_callbacks_{nullptr};
 };

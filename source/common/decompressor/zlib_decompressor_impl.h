@@ -41,13 +41,16 @@ public:
   uint64_t checksum();
 
   // Decompressor
-  void decompress(const Buffer::Instance& input_buffer, Buffer::Instance& output_buffer) override;
+  void decompress(Buffer::Instance& buffer) override;
+
+  bool isError(); 
 
 private:
   bool inflateNext();
 
   const uint64_t chunk_size_;
   bool initialized_;
+  bool is_error_;
 
   std::unique_ptr<unsigned char[]> chunk_char_ptr_;
   std::unique_ptr<z_stream, std::function<void(z_stream*)>> zstream_ptr_;
