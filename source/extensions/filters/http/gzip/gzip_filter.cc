@@ -103,10 +103,10 @@ uint64_t GzipFilterConfig::windowBitsUint(Protobuf::uint32 window_bits) {
 GzipFilter::GzipFilter(const GzipFilterConfigSharedPtr& config)
     : skip_decompression_{true}, 
       skip_compression_{true}, 
-      skip_request_compression_{true}, compressed_data_(), compressor_(), config_(config) {}
-
+      skip_request_compression_{true}, compressor_(), decompressor_(), config_(config) {}
 
 Http::FilterHeadersStatus GzipFilter::decodeHeaders(Http::HeaderMap& headers, bool) {
+  // Compress encode data
   if (config_->runtime().snapshot().featureEnabled("gzip.filter_enabled", 100) &&
       isAcceptEncodingAllowed(headers)) {
     skip_compression_ = false;
@@ -117,9 +117,10 @@ Http::FilterHeadersStatus GzipFilter::decodeHeaders(Http::HeaderMap& headers, bo
     config_->stats().not_compressed_.inc();
   }
 
-  const bool compress_request{true};
-
-  if (!compress_request && isGzipEncoding(headers) && !(isMinimumContentLength(headers) &&
+  // Decompress decode data
+  const bool compress_request{false};
+  if (!compress_request && config_->runtime().snapshot().featureEnabled("gzip.filter_enabled", 100) 
+        && isGzipEncoding(headers) && !(isMinimumContentLength(headers) &&
       isContentTypeAllowed(headers) && hasCacheControlNoTransform(headers))) {
     decompressor_.init(config_->windowBits());
     request_headers_ = &headers;
@@ -129,19 +130,9 @@ Http::FilterHeadersStatus GzipFilter::decodeHeaders(Http::HeaderMap& headers, bo
     config_->stats().not_decompressed_.inc();
   }
 
-  if (compress_request && isMinimumContentLength(headers) && isContentTypeAllowed(headers) 
-        && !hasCacheControlNoTransform(headers) && isEtagAllowed(headers) && isTransferEncodingAllowed(headers) 
-        && !headers.ContentEncoding()) {
-    skip_request_compression_ = false;
-    sanitizeEtagHeader(headers);
-    insertVaryHeader(headers);
-    headers.removeContentLength();
-    headers.insertContentEncoding().value(Http::Headers::get().ContentEncodingValues.Gzip);
-    compressor_.init(config_->compressionLevel(), config_->compressionStrategy(),
-                     config_->windowBits(), config_->memoryLevel());
-    config_->stats().compressed_.inc();
-  } else {
-    config_->stats().not_decompressed_.inc();
+  // Compress decode data
+  if (compress_request) {
+    skip_request_compression_ = mayCompress(headers);
   }
 
   return Http::FilterHeadersStatus::Continue;
@@ -168,19 +159,8 @@ Http::FilterDataStatus GzipFilter::decodeData(Buffer::Instance& data, bool end_s
 }
 
 Http::FilterHeadersStatus GzipFilter::encodeHeaders(Http::HeaderMap& headers, bool end_stream) {
-  if (!end_stream && !skip_compression_ && isMinimumContentLength(headers) &&
-      isContentTypeAllowed(headers) && !hasCacheControlNoTransform(headers) &&
-      isEtagAllowed(headers) && isTransferEncodingAllowed(headers) && !headers.ContentEncoding()) {
-    sanitizeEtagHeader(headers);
-    insertVaryHeader(headers);
-    headers.removeContentLength();
-    headers.insertContentEncoding().value(Http::Headers::get().ContentEncodingValues.Gzip);
-    compressor_.init(config_->compressionLevel(), config_->compressionStrategy(),
-                     config_->windowBits(), config_->memoryLevel());
-    config_->stats().compressed_.inc();
-  } else if (!skip_compression_) {
-    skip_compression_ = true;
-    config_->stats().not_compressed_.inc();
+  if (!end_stream && !skip_compression_) {
+    skip_compression_ = mayCompress(headers);
   }
   return Http::FilterHeadersStatus::Continue;
 }
@@ -192,6 +172,24 @@ Http::FilterDataStatus GzipFilter::encodeData(Buffer::Instance& data, bool end_s
     config_->stats().total_compressed_bytes_.add(data.length());
   }
   return Http::FilterDataStatus::Continue;
+}
+
+bool GzipFilter::mayCompress(Http::HeaderMap& headers) {
+  if (isMinimumContentLength(headers) &&
+      isContentTypeAllowed(headers) && !hasCacheControlNoTransform(headers) &&
+      isEtagAllowed(headers) && isTransferEncodingAllowed(headers) && !headers.ContentEncoding()) {
+    sanitizeEtagHeader(headers);
+    insertVaryHeader(headers);
+    headers.removeContentLength();
+    headers.insertContentEncoding().value(Http::Headers::get().ContentEncodingValues.Gzip);
+    compressor_.init(config_->compressionLevel(), config_->compressionStrategy(),
+                     config_->windowBits(), config_->memoryLevel());
+    config_->stats().compressed_.inc();
+    return false;
+  } 
+  
+  config_->stats().not_compressed_.inc();
+  return true;
 }
 
 bool GzipFilter::isGzipEncoding(Http::HeaderMap& headers) const {

@@ -67,12 +67,14 @@ protected:
   }
 
   void verifyCompressedData() {
-    decompressor_.decompress(data_, decompressed_data_);
-    const std::string uncompressed_str{decompressed_data_.toString()};
+    const uint64_t compressed_len = data_.length();  
+    decompressor_.decompress(data_);
+    ASSERT_EQ(false, decompressor_.isError());
+    const std::string uncompressed_str{data_.toString()};
     ASSERT_EQ(expected_str_.length(), uncompressed_str.length());
     EXPECT_EQ(expected_str_, uncompressed_str);
     EXPECT_EQ(expected_str_.length(), stats_.counter("test.gzip.total_uncompressed_bytes").value());
-    EXPECT_EQ(data_.length(), stats_.counter("test.gzip.total_compressed_bytes").value());
+    EXPECT_EQ(compressed_len, stats_.counter("test.gzip.total_compressed_bytes").value());
   }
 
   void feedBuffer(uint64_t size) {
@@ -121,7 +123,6 @@ protected:
   std::unique_ptr<GzipFilter> filter_;
   Buffer::OwnedImpl data_;
   Decompressor::ZlibDecompressorImpl decompressor_;
-  Buffer::OwnedImpl decompressed_data_;
   std::string expected_str_;
   Stats::IsolatedStoreImpl stats_;
   NiceMock<Runtime::MockLoader> runtime_;

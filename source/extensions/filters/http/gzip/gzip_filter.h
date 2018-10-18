@@ -151,6 +151,7 @@ private:
   // the logic in these private member functions would be availale in another class.
   friend class GzipFilterTest;
 
+  bool mayCompress(Http::HeaderMap& headers);
   bool isGzipEncoding(Http::HeaderMap& headers) const;
   bool hasCacheControlNoTransform(Http::HeaderMap& headers) const;
   bool isAcceptEncodingAllowed(Http::HeaderMap& headers) const;
@@ -165,7 +166,6 @@ private:
   bool skip_decompression_;
   bool skip_compression_;
   bool skip_request_compression_;
-  Buffer::OwnedImpl compressed_data_;
   Compressor::ZlibCompressorImpl compressor_;
   Decompressor::ZlibDecompressorImpl decompressor_;
   GzipFilterConfigSharedPtr config_;

@@ -15,42 +15,42 @@ class ZlibDecompressorImplTest : public testing::Test {
 protected:
   void drainBuffer(Buffer::OwnedImpl& buffer) { buffer.drain(buffer.length()); }
 
-  // void testcompressDecompressWithUncommonParams(
-  //     Compressor::ZlibCompressorImpl::CompressionLevel comp_level,
-  //     Compressor::ZlibCompressorImpl::CompressionStrategy comp_strategy, int64_t window_bits,
-  //     uint64_t memory_level) {
-  //   Buffer::OwnedImpl buffer;
-  //   Buffer::OwnedImpl accumulation_buffer;
+  void testcompressDecompressWithUncommonParams(
+      Compressor::ZlibCompressorImpl::CompressionLevel comp_level,
+      Compressor::ZlibCompressorImpl::CompressionStrategy comp_strategy, int64_t window_bits,
+      uint64_t memory_level) {
+    Buffer::OwnedImpl buffer;
+    Buffer::OwnedImpl accumulation_buffer;
 
-  //   Envoy::Compressor::ZlibCompressorImpl compressor;
-  //   compressor.init(comp_level, comp_strategy, window_bits, memory_level);
+    Envoy::Compressor::ZlibCompressorImpl compressor;
+    compressor.init(comp_level, comp_strategy, window_bits, memory_level);
 
-  //   std::string original_text{};
-  //   for (uint64_t i = 0; i < 30; ++i) {
-  //     TestUtility::feedBufferWithRandomCharacters(buffer, default_input_size * i, i);
-  //     original_text.append(buffer.toString());
-  //     compressor.compress(buffer, Compressor::State::Flush);
-  //     accumulation_buffer.add(buffer);
-  //     drainBuffer(buffer);
-  //   }
-  //   ASSERT_EQ(0, buffer.length());
+    std::string original_text{};
+    for (uint64_t i = 0; i < 30; ++i) {
+      TestUtility::feedBufferWithRandomCharacters(buffer, default_input_size * i, i);
+      original_text.append(buffer.toString());
+      compressor.compress(buffer, Compressor::State::Flush);
+      accumulation_buffer.add(buffer);
+      drainBuffer(buffer);
+    }
+    ASSERT_EQ(0, buffer.length());
 
-  //   compressor.compress(buffer, Compressor::State::Finish);
-  //   accumulation_buffer.add(buffer);
+    compressor.compress(buffer, Compressor::State::Finish);
+    accumulation_buffer.add(buffer);
 
-  //   drainBuffer(buffer);
-  //   ASSERT_EQ(0, buffer.length());
+    drainBuffer(buffer);
+    ASSERT_EQ(0, buffer.length());
 
-  //   ZlibDecompressorImpl decompressor;
-  //   decompressor.init(window_bits);
+    ZlibDecompressorImpl decompressor;
+    decompressor.init(window_bits);
 
-  //   decompressor.decompress(accumulation_buffer, buffer);
-  //   std::string decompressed_text{buffer.toString()};
+    decompressor.decompress(accumulation_buffer);
+    std::string decompressed_text{accumulation_buffer.toString()};
 
-  //   ASSERT_EQ(compressor.checksum(), decompressor.checksum());
-  //   ASSERT_EQ(original_text.length(), decompressed_text.length());
-  //   EXPECT_EQ(original_text, decompressed_text);
-  // }
+    ASSERT_EQ(compressor.checksum(), decompressor.checksum());
+    ASSERT_EQ(original_text.length(), decompressed_text.length());
+    EXPECT_EQ(original_text, decompressed_text);
+  }
 
   static const int64_t gzip_window_bits{31};
   static const int64_t memory_level{8};
@@ -75,7 +75,6 @@ protected:
 // Exercises death by passing bad initialization params or by calling decompress before init.
 TEST_F(ZlibDecompressorImplDeathTest, DecompressorTestDeath) {
   EXPECT_DEATH_LOG_TO_STDERR(decompressorBadInitTestHelper(100), "assert failure: result >= 0");
-  EXPECT_DEATH_LOG_TO_STDERR(unitializedDecompressorTestHelper(), "assert failure: result == Z_OK");
 }
 
 // Exercises decompressor's checksum by calling it before init or decompress.
@@ -177,67 +176,67 @@ TEST_F(ZlibDecompressorImplTest, DecompressWithSmallOutputBuffer) {
   EXPECT_EQ(original_text, decompressed_text);
 }
 
-// // Exercises decompression with other supported zlib initialization params.
-// TEST_F(ZlibDecompressorImplTest, CompressDecompressWithUncommonParams) {
-//   // Test with different memory levels.
-//   for (uint64_t i = 1; i < 10; ++i) {
-//     testcompressDecompressWithUncommonParams(
-//         Compressor::ZlibCompressorImpl::CompressionLevel::Best,
-//         Envoy::Compressor::ZlibCompressorImpl::CompressionStrategy::Rle, 15, i);
+// Exercises decompression with other supported zlib initialization params.
+TEST_F(ZlibDecompressorImplTest, CompressDecompressWithUncommonParams) {
+  // Test with different memory levels.
+  for (uint64_t i = 1; i < 10; ++i) {
+    testcompressDecompressWithUncommonParams(
+        Compressor::ZlibCompressorImpl::CompressionLevel::Best,
+        Envoy::Compressor::ZlibCompressorImpl::CompressionStrategy::Rle, 15, i);
 
-//     testcompressDecompressWithUncommonParams(
-//         Compressor::ZlibCompressorImpl::CompressionLevel::Best,
-//         Envoy::Compressor::ZlibCompressorImpl::CompressionStrategy::Rle, 15, i);
+    testcompressDecompressWithUncommonParams(
+        Compressor::ZlibCompressorImpl::CompressionLevel::Best,
+        Envoy::Compressor::ZlibCompressorImpl::CompressionStrategy::Rle, 15, i);
 
-//     testcompressDecompressWithUncommonParams(
-//         Compressor::ZlibCompressorImpl::CompressionLevel::Speed,
-//         Envoy::Compressor::ZlibCompressorImpl::CompressionStrategy::Huffman, 15, i);
+    testcompressDecompressWithUncommonParams(
+        Compressor::ZlibCompressorImpl::CompressionLevel::Speed,
+        Envoy::Compressor::ZlibCompressorImpl::CompressionStrategy::Huffman, 15, i);
 
-//     testcompressDecompressWithUncommonParams(
-//         Compressor::ZlibCompressorImpl::CompressionLevel::Speed,
-//         Envoy::Compressor::ZlibCompressorImpl::CompressionStrategy::Filtered, 15, i);
-//   }
-// }
+    testcompressDecompressWithUncommonParams(
+        Compressor::ZlibCompressorImpl::CompressionLevel::Speed,
+        Envoy::Compressor::ZlibCompressorImpl::CompressionStrategy::Filtered, 15, i);
+  }
+}
 
-// TEST_F(ZlibDecompressorImplTest, CompressDecompressOfMultipleSlices) {
-//   Buffer::OwnedImpl buffer;
-//   Buffer::OwnedImpl accumulation_buffer;
+TEST_F(ZlibDecompressorImplTest, CompressDecompressOfMultipleSlices) {
+  Buffer::OwnedImpl buffer;
+  Buffer::OwnedImpl accumulation_buffer;
 
-//   const std::string sample{"slice, slice, slice, slice, slice, "};
-//   std::string original_text;
-//   for (uint64_t i = 0; i < 20; ++i) {
-//     Buffer::BufferFragmentImpl* frag = new Buffer::BufferFragmentImpl(
-//         sample.c_str(), sample.size(),
-//         [](const void*, size_t, const Buffer::BufferFragmentImpl* frag) { delete frag; });
+  const std::string sample{"slice, slice, slice, slice, slice, "};
+  std::string original_text;
+  for (uint64_t i = 0; i < 20; ++i) {
+    Buffer::BufferFragmentImpl* frag = new Buffer::BufferFragmentImpl(
+        sample.c_str(), sample.size(),
+        [](const void*, size_t, const Buffer::BufferFragmentImpl* frag) { delete frag; });
 
-//     buffer.addBufferFragment(*frag);
-//     original_text.append(sample);
-//   }
+    buffer.addBufferFragment(*frag);
+    original_text.append(sample);
+  }
 
-//   const uint64_t num_slices = buffer.getRawSlices(nullptr, 0);
-//   EXPECT_EQ(num_slices, 20);
+  const uint64_t num_slices = buffer.getRawSlices(nullptr, 0);
+  EXPECT_EQ(num_slices, 20);
 
-//   Envoy::Compressor::ZlibCompressorImpl compressor;
-//   compressor.init(Envoy::Compressor::ZlibCompressorImpl::CompressionLevel::Standard,
-//                   Envoy::Compressor::ZlibCompressorImpl::CompressionStrategy::Standard,
-//                   gzip_window_bits, memory_level);
+  Envoy::Compressor::ZlibCompressorImpl compressor;
+  compressor.init(Envoy::Compressor::ZlibCompressorImpl::CompressionLevel::Standard,
+                  Envoy::Compressor::ZlibCompressorImpl::CompressionStrategy::Standard,
+                  gzip_window_bits, memory_level);
 
-//   compressor.compress(buffer, Compressor::State::Flush);
-//   accumulation_buffer.add(buffer);
+  compressor.compress(buffer, Compressor::State::Flush);
+  accumulation_buffer.add(buffer);
 
-//   ZlibDecompressorImpl decompressor;
-//   decompressor.init(gzip_window_bits);
+  ZlibDecompressorImpl decompressor;
+  decompressor.init(gzip_window_bits);
 
-//   drainBuffer(buffer);
-//   ASSERT_EQ(0, buffer.length());
+  drainBuffer(buffer);
+  ASSERT_EQ(0, buffer.length());
 
-//   decompressor.decompress(accumulation_buffer, buffer);
-//   std::string decompressed_text{buffer.toString()};
+  decompressor.decompress(accumulation_buffer);
+  std::string decompressed_text{accumulation_buffer.toString()};
 
-//   ASSERT_EQ(compressor.checksum(), decompressor.checksum());
-//   ASSERT_EQ(original_text.length(), decompressed_text.length());
-//   EXPECT_EQ(original_text, decompressed_text);
-// }
+  ASSERT_EQ(compressor.checksum(), decompressor.checksum());
+  ASSERT_EQ(original_text.length(), decompressed_text.length());
+  EXPECT_EQ(original_text, decompressed_text);
+}
 
 } // namespace
 } // namespace Decompressor
