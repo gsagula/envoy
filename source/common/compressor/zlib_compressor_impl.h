@@ -22,7 +22,8 @@ public:
    * 256K bytes. @see http://zlib.net/zlib_how.html
    * @param chunk_size amount of memory reserved for the compressor output.
    */
-  ZlibCompressorImpl(uint64_t chunk_size);
+  ZlibCompressorImpl(uint64_t chunk_size, CompressionLevel level, 
+    CompressionStrategy strategy, int64_t window_bits, uint64_t memory_level);
 
   /**
    * Enum values used to set compression level during initialization.
@@ -61,8 +62,7 @@ public:
    * @param memory_level sets how much memory should be allocated for the internal compression, min
    * 1 and max 9. @see memory_level (zlib manual)
    */
-  void init(CompressionLevel level, CompressionStrategy strategy, int64_t window_bits,
-            uint64_t memory_level);
+  void bool init() override;
 
   /**
    * It returns the checksum of all output produced so far. Compressor's checksum at the end of the

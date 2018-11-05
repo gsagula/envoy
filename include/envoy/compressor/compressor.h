@@ -18,6 +18,12 @@ public:
   virtual ~Compressor() {}
 
   /**
+   * Initializes the compressor and must be called before compress. 
+   * @return true if compressor is initialized without errors.
+   */
+  virtual bool init();
+
+  /**
    * Compresses data buffer.
    * @param buffer supplies the reference to data to be compressed. The content of the buffer will
    *        be replaced inline with the compressed data.
