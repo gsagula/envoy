@@ -21,7 +21,7 @@ public:
    * Initializes the compressor and must be called before compress. 
    * @return true if compressor is initialized without errors.
    */
-  virtual bool init();
+  // virtual bool init();
 
   /**
    * Compresses data buffer.

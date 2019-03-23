@@ -14,7 +14,9 @@ class HttpFilterNameValues {
 public:
   // Buffer filter
   const std::string Buffer = "envoy.buffer";
-  // CORS filter
+  // Compression filter
+  const std::string Compression = "envoy.filters.http.compression";
+  // Dynamo filter
   const std::string Cors = "envoy.cors";
   // Dynamo filter
   const std::string Dynamo = "envoy.http_dynamo_filter";
