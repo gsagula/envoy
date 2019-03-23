@@ -23,6 +23,15 @@ TEST(HeaderStringTest, All) {
     EXPECT_EQ(5U, string.size());
   }
 
+  // Static LowerCaseString operators
+  {
+    LowerCaseString banana("banana");
+    LowerCaseString lemon("lemon");
+    EXPECT_TRUE(banana < lemon);
+    EXPECT_TRUE(banana != lemon);
+    EXPECT_TRUE(banana == banana);
+  }
+
   // Static std::string constructor
   {
     std::string static_string("HELLO");
@@ -32,13 +41,13 @@ TEST(HeaderStringTest, All) {
     EXPECT_EQ(5U, string.size());
   }
 
-  // Static move contructor
+  // Static move constructor
   {
     std::string static_string("HELLO");
     HeaderString string1(static_string);
     HeaderString string2(std::move(string1));
     EXPECT_STREQ("HELLO", string2.c_str());
-    EXPECT_EQ(static_string.c_str(), string1.c_str());
+    EXPECT_EQ(static_string.c_str(), string1.c_str()); // NOLINT(bugprone-use-after-move)
     EXPECT_EQ(static_string.c_str(), string2.c_str());
     EXPECT_EQ(5U, string1.size());
     EXPECT_EQ(5U, string2.size());
@@ -50,7 +59,7 @@ TEST(HeaderStringTest, All) {
     string.setCopy("hello", 5);
     EXPECT_EQ(HeaderString::Type::Inline, string.type());
     HeaderString string2(std::move(string));
-    EXPECT_TRUE(string.empty());
+    EXPECT_TRUE(string.empty()); // NOLINT(bugprone-use-after-move)
     EXPECT_EQ(HeaderString::Type::Inline, string.type());
     EXPECT_EQ(HeaderString::Type::Inline, string2.type());
     string.append("world", 5);
@@ -67,7 +76,7 @@ TEST(HeaderStringTest, All) {
     string.setCopy(large.c_str(), large.size());
     EXPECT_EQ(HeaderString::Type::Dynamic, string.type());
     HeaderString string2(std::move(string));
-    EXPECT_TRUE(string.empty());
+    EXPECT_TRUE(string.empty()); // NOLINT(bugprone-use-after-move)
     EXPECT_EQ(HeaderString::Type::Inline, string.type());
     EXPECT_EQ(HeaderString::Type::Dynamic, string2.type());
     string.append("b", 1);
@@ -705,7 +714,7 @@ TEST(HeaderMapImplTest, TestAppendHeader) {
   }
 }
 
-TEST(HeaderMapImplTest, TestHeaderLengthChecks) {
+TEST(HeaderMapImplDeathTest, TestHeaderLengthChecks) {
   HeaderString value;
   value.setCopy("some;", 5);
   EXPECT_DEATH_LOG_TO_STDERR(value.append(nullptr, std::numeric_limits<uint32_t>::max()),

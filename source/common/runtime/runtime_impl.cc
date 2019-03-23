@@ -1,8 +1,5 @@
 #include "common/runtime/runtime_impl.h"
 
-#include <fcntl.h>
-#include <unistd.h>
-
 #include <cstdint>
 #include <random>
 #include <string>
@@ -15,13 +12,25 @@
 #include "common/common/assert.h"
 #include "common/common/fmt.h"
 #include "common/common/utility.h"
-#include "common/filesystem/filesystem_impl.h"
+#include "common/filesystem/directory.h"
 #include "common/protobuf/utility.h"
+#include "common/runtime/runtime_features.h"
 
+#include "absl/strings/match.h"
 #include "openssl/rand.h"
 
 namespace Envoy {
 namespace Runtime {
+
+bool runtimeFeatureEnabled(const std::string& feature) {
+  ASSERT(absl::StartsWith(feature, "envoy.reloadable_features"));
+  if (Runtime::LoaderSingleton::getExisting()) {
+    return Runtime::LoaderSingleton::getExisting()->snapshot().runtimeFeatureEnabled(feature);
+  }
+  ENVOY_LOG_TO_LOGGER(Envoy::Logger::Registry::getLog(Envoy::Logger::Id::runtime), warn,
+                      "Unable to use runtime singleton for feature {}", feature);
+  return RuntimeFeaturesDefaults::get().enabledByDefault(feature);
+}
 
 const size_t RandomGeneratorImpl::UUID_LENGTH = 36;
 
@@ -147,13 +156,42 @@ std::string RandomGeneratorImpl::uuid() {
   return std::string(uuid, UUID_LENGTH);
 }
 
+bool SnapshotImpl::deprecatedFeatureEnabled(const std::string& key) const {
+  bool allowed = false;
+  // If the value is not explicitly set as a runtime boolean, the default value is based on
+  // disallowedByDefault.
+  if (!getBoolean(key, allowed)) {
+    allowed = !RuntimeFeaturesDefaults::get().disallowedByDefault(key);
+  }
+
+  if (!allowed) {
+    // If either disallowed by default or configured off, the feature is not enabled.
+    return false;
+  }
+  // The feature is allowed. It is assumed this check is called when the feature
+  // is about to be used, so increment the feature use stat.
+  stats_.deprecated_feature_use_.inc();
+  return true;
+}
+
+bool SnapshotImpl::runtimeFeatureEnabled(const std::string& key) const {
+  bool enabled = false;
+  // If the value is not explicitly set as a runtime boolean, the default value is based on
+  // disallowedByDefault.
+  if (!getBoolean(key, enabled)) {
+    enabled = RuntimeFeaturesDefaults::get().enabledByDefault(key);
+  }
+
+  return enabled;
+}
+
 bool SnapshotImpl::featureEnabled(const std::string& key, uint64_t default_value,
                                   uint64_t random_value, uint64_t num_buckets) const {
   return random_value % num_buckets < std::min(getInteger(key, default_value), num_buckets);
 }
 
 bool SnapshotImpl::featureEnabled(const std::string& key, uint64_t default_value) const {
-  // Avoid PNRG if we know we don't need it.
+  // Avoid PRNG if we know we don't need it.
   uint64_t cutoff = std::min(getInteger(key, default_value), static_cast<uint64_t>(100));
   if (cutoff == 0) {
     return false;
@@ -187,23 +225,27 @@ bool SnapshotImpl::featureEnabled(const std::string& key,
                                   const envoy::type::FractionalPercent& default_value,
                                   uint64_t random_value) const {
   const auto& entry = values_.find(key);
-  uint64_t numerator, denominator;
+  envoy::type::FractionalPercent percent;
   if (entry != values_.end() && entry->second.fractional_percent_value_.has_value()) {
-    numerator = entry->second.fractional_percent_value_->numerator();
-    denominator = ProtobufPercentHelper::fractionalPercentDenominatorToInt(
-        entry->second.fractional_percent_value_->denominator());
+    percent = entry->second.fractional_percent_value_.value();
   } else if (entry != values_.end() && entry->second.uint_value_.has_value()) {
-    // The runtime value must have been specified as an integer rather than a fractional percent
-    // proto. To preserve legacy semantics, we'll assume this represents a percentage.
-    numerator = entry->second.uint_value_.value();
-    denominator = 100;
+    // Check for > 100 because the runtime value is assumed to be specified as
+    // an integer, and it also ensures that truncating the uint64_t runtime
+    // value into a uint32_t percent numerator later is safe
+    if (entry->second.uint_value_.value() > 100) {
+      return true;
+    }
+
+    // The runtime value was specified as an integer rather than a fractional
+    // percent proto. To preserve legacy semantics, we treat it as a percentage
+    // (i.e. denominator of 100).
+    percent.set_numerator(entry->second.uint_value_.value());
+    percent.set_denominator(envoy::type::FractionalPercent::HUNDRED);
   } else {
-    numerator = default_value.numerator();
-    denominator =
-        ProtobufPercentHelper::fractionalPercentDenominatorToInt(default_value.denominator());
+    percent = default_value;
   }
 
-  return random_value % denominator < numerator;
+  return ProtobufPercentHelper::evaluateFractionalPercent(percent, random_value);
 }
 
 uint64_t SnapshotImpl::getInteger(const std::string& key, uint64_t default_value) const {
@@ -215,13 +257,22 @@ uint64_t SnapshotImpl::getInteger(const std::string& key, uint64_t default_value
   }
 }
 
+bool SnapshotImpl::getBoolean(const std::string& key, bool& value) const {
+  auto entry = values_.find(key);
+  if (entry != values_.end() && entry->second.bool_value_.has_value()) {
+    value = entry->second.bool_value_.value();
+    return true;
+  }
+  return false;
+}
+
 const std::vector<Snapshot::OverrideLayerConstPtr>& SnapshotImpl::getLayers() const {
   return layers_;
 }
 
 SnapshotImpl::SnapshotImpl(RandomGenerator& generator, RuntimeStats& stats,
                            std::vector<OverrideLayerConstPtr>&& layers)
-    : layers_{std::move(layers)}, generator_{generator} {
+    : layers_{std::move(layers)}, generator_{generator}, stats_{stats} {
   for (const auto& layer : layers_) {
     for (const auto& kv : layer->values()) {
       values_.erase(kv.first);
@@ -242,9 +293,23 @@ SnapshotImpl::Entry SnapshotImpl::createEntry(const std::string& value) {
   return entry;
 }
 
+bool SnapshotImpl::parseEntryBooleanValue(Entry& entry) {
+  absl::string_view stripped = entry.raw_string_value_;
+  stripped = absl::StripAsciiWhitespace(stripped);
+
+  if (absl::EqualsIgnoreCase(stripped, "true")) {
+    entry.bool_value_ = true;
+    return true;
+  } else if (absl::EqualsIgnoreCase(stripped, "false")) {
+    entry.bool_value_ = false;
+    return true;
+  }
+  return false;
+}
+
 bool SnapshotImpl::parseEntryUintValue(Entry& entry) {
   uint64_t converted_uint64;
-  if (StringUtil::atoul(entry.raw_string_value_.c_str(), converted_uint64)) {
+  if (StringUtil::atoull(entry.raw_string_value_.c_str(), converted_uint64)) {
     entry.uint_value_ = converted_uint64;
     return true;
   }
@@ -277,51 +342,36 @@ void AdminLayer::mergeValues(const std::unordered_map<std::string, std::string>&
   stats_.admin_overrides_active_.set(values_.empty() ? 0 : 1);
 }
 
-DiskLayer::DiskLayer(const std::string& name, const std::string& path,
-                     Api::OsSysCalls& os_sys_calls)
-    : OverrideLayerImpl{name}, os_sys_calls_(os_sys_calls) {
-  walkDirectory(path, "", 1);
+DiskLayer::DiskLayer(const std::string& name, const std::string& path, Api::Api& api)
+    : OverrideLayerImpl{name} {
+  walkDirectory(path, "", 1, api);
 }
 
-void DiskLayer::walkDirectory(const std::string& path, const std::string& prefix, uint32_t depth) {
+void DiskLayer::walkDirectory(const std::string& path, const std::string& prefix, uint32_t depth,
+                              Api::Api& api) {
   ENVOY_LOG(debug, "walking directory: {}", path);
   if (depth > MaxWalkDepth) {
-    throw EnvoyException(fmt::format("Walk recursion depth exceded {}", MaxWalkDepth));
+    throw EnvoyException(fmt::format("Walk recursion depth exceeded {}", MaxWalkDepth));
   }
   // Check if this is an obviously bad path.
-  if (Filesystem::illegalPath(path)) {
+  if (api.fileSystem().illegalPath(path)) {
     throw EnvoyException(fmt::format("Invalid path: {}", path));
   }
-  Directory current_dir(path);
-  while (true) {
-    errno = 0;
-    dirent* entry = readdir(current_dir.dir_);
-    if (entry == nullptr && errno != 0) {
-      throw EnvoyException(fmt::format("unable to iterate directory: {}", path));
-    }
 
-    if (entry == nullptr) {
-      break;
-    }
-
-    std::string full_path = path + "/" + entry->d_name;
+  Filesystem::Directory directory(path);
+  for (const Filesystem::DirectoryEntry& entry : directory) {
+    std::string full_path = path + "/" + entry.name_;
     std::string full_prefix;
     if (prefix.empty()) {
-      full_prefix = entry->d_name;
+      full_prefix = entry.name_;
     } else {
-      full_prefix = prefix + "." + entry->d_name;
+      full_prefix = prefix + "." + entry.name_;
     }
 
-    struct stat stat_result;
-    const Api::SysCallIntResult result = os_sys_calls_.stat(full_path.c_str(), &stat_result);
-    if (result.rc_ != 0) {
-      throw EnvoyException(fmt::format("unable to stat file: '{}'", full_path));
-    }
-
-    if (S_ISDIR(stat_result.st_mode) && std::string(entry->d_name) != "." &&
-        std::string(entry->d_name) != "..") {
-      walkDirectory(full_path, full_prefix, depth + 1);
-    } else if (S_ISREG(stat_result.st_mode)) {
+    if (entry.type_ == Filesystem::FileType::Directory && entry.name_ != "." &&
+        entry.name_ != "..") {
+      walkDirectory(full_path, full_prefix, depth + 1, api);
+    } else if (entry.type_ == Filesystem::FileType::Regular) {
       // Suck the file into a string. This is not very efficient but it should be good enough
       // for small files. Also, as noted elsewhere, none of this is non-blocking which could
       // theoretically lead to issues.
@@ -330,7 +380,7 @@ void DiskLayer::walkDirectory(const std::string& path, const std::string& prefix
 
       // Read the file and remove any comments. A comment is a line starting with a '#' character.
       // Comments are useful for placeholder files with no value.
-      const std::string text_file{Filesystem::fileReadToEnd(full_path)};
+      const std::string text_file{api.fileSystem().fileReadToEnd(full_path)};
       const auto lines = StringUtil::splitToken(text_file, "\n");
       for (const auto line : lines) {
         if (!line.empty() && line.front() == '#') {
@@ -387,12 +437,10 @@ DiskBackedLoaderImpl::DiskBackedLoaderImpl(Event::Dispatcher& dispatcher,
                                            const std::string& root_symlink_path,
                                            const std::string& subdir,
                                            const std::string& override_dir, Stats::Store& store,
-                                           RandomGenerator& generator,
-                                           Api::OsSysCallsPtr os_sys_calls)
+                                           RandomGenerator& generator, Api::Api& api)
     : LoaderImpl(DoNotLoadSnapshot{}, generator, store, tls),
       watcher_(dispatcher.createFilesystemWatcher()), root_path_(root_symlink_path + "/" + subdir),
-      override_path_(root_symlink_path + "/" + override_dir),
-      os_sys_calls_(std::move(os_sys_calls)) {
+      override_path_(root_symlink_path + "/" + override_dir), api_(api) {
   watcher_->addWatch(root_symlink_path, Filesystem::Watcher::Events::MovedTo,
                      [this](uint32_t) -> void { loadNewSnapshot(); });
 
@@ -409,9 +457,9 @@ RuntimeStats LoaderImpl::generateStats(Stats::Store& store) {
 std::unique_ptr<SnapshotImpl> DiskBackedLoaderImpl::createNewSnapshot() {
   std::vector<Snapshot::OverrideLayerConstPtr> layers;
   try {
-    layers.push_back(std::make_unique<DiskLayer>("root", root_path_, *os_sys_calls_));
-    if (Filesystem::directoryExists(override_path_)) {
-      layers.push_back(std::make_unique<DiskLayer>("override", override_path_, *os_sys_calls_));
+    layers.push_back(std::make_unique<DiskLayer>("root", root_path_, api_));
+    if (api_.fileSystem().directoryExists(override_path_)) {
+      layers.push_back(std::make_unique<DiskLayer>("override", override_path_, api_));
       stats_.override_dir_exists_.inc();
     } else {
       stats_.override_dir_not_exists_.inc();

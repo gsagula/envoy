@@ -7,21 +7,26 @@
 #include <string>
 #include <vector>
 
+#include "envoy/api/api.h"
 #include "envoy/buffer/buffer.h"
 #include "envoy/config/bootstrap/v2/bootstrap.pb.h"
 #include "envoy/network/address.h"
 #include "envoy/stats/stats.h"
 #include "envoy/stats/store.h"
+#include "envoy/thread/thread.h"
 
 #include "common/buffer/buffer_impl.h"
+#include "common/common/block_memory_hash_set.h"
 #include "common/common/c_smart_ptr.h"
 #include "common/common/thread.h"
 #include "common/http/header_map_impl.h"
 #include "common/protobuf/utility.h"
+#include "common/stats/fake_symbol_table_impl.h"
 #include "common/stats/raw_stat_data.h"
 
 #include "test/test_common/printers.h"
 
+#include "absl/time/time.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -66,7 +71,7 @@ namespace Envoy {
 /*
   Macro to use instead of EXPECT_DEATH when stderr is produced by a logger.
   It temporarily installs stderr sink and restores the original logger sink after the test
-  completes and sdterr_sink object goes of of scope.
+  completes and stderr_sink object goes of of scope.
   EXPECT_DEATH(statement, regex) test passes when statement causes crash and produces error message
   matching regex. Test fails when statement does not crash or it crashes but message does not
   match regex. If a message produced during crash is redirected away from strerr, the test fails.
@@ -105,9 +110,9 @@ class TestUtility {
 public:
   /**
    * Compare 2 HeaderMaps.
-   * @param lhs supplies HeaderMaps 1.
-   * @param rhs supplies HeaderMaps 2.
-   * @return TRUE if the HeaderMapss are equal, ignoring the order of the
+   * @param lhs supplies HeaderMap 1.
+   * @param rhs supplies HeaderMap 2.
+   * @return TRUE if the HeaderMaps are equal, ignoring the order of the
    * headers, false if not.
    */
   static bool headerMapEqualIgnoreOrder(const Http::HeaderMap& lhs, const Http::HeaderMap& rhs);
@@ -116,7 +121,8 @@ public:
    * Compare 2 buffers.
    * @param lhs supplies buffer 1.
    * @param rhs supplies buffer 2.
-   * @return TRUE if the buffers are equal, false if not.
+   * @return TRUE if the buffers contain equal content
+   *         (i.e., if lhs.toString() == rhs.toString()), false if not.
    */
   static bool buffersEqual(const Buffer::Instance& lhs, const Buffer::Instance& rhs);
 
@@ -124,7 +130,7 @@ public:
    * Feed a buffer with random characters.
    * @param buffer supplies the buffer to be fed.
    * @param n_char number of characters that should be added to the supplied buffer.
-   * @param seed seeds pseudo-random number genarator (default = 0).
+   * @param seed seeds pseudo-random number generator (default = 0).
    */
   static void feedBufferWithRandomCharacters(Buffer::Instance& buffer, uint64_t n_char,
                                              uint64_t seed = 0);
@@ -253,9 +259,9 @@ public:
   /**
    * Returns a "novel" IPv4 loopback address, if available.
    * For many tests, we want a loopback address other than 127.0.0.1 where possible. For some
-   * platforms such as OSX, only 127.0.0.1 is available for IPv4 loopback.
+   * platforms such as macOS, only 127.0.0.1 is available for IPv4 loopback.
    *
-   * @return string 127.0.0.x , where x is "1" for OSX and "9" otherwise.
+   * @return string 127.0.0.x , where x is "1" for macOS and "9" otherwise.
    */
   static std::string getIpv4Loopback() {
 #ifdef __APPLE__
@@ -281,7 +287,7 @@ public:
   // Tests using this will be of the form IpVersions/SslSocketTest.HalfClose/IPv4
   // instead of IpVersions/SslSocketTest.HalfClose/1
   static std::string
-  ipTestParamsToString(const testing::TestParamInfo<Network::Address::IpVersion>& params) {
+  ipTestParamsToString(const ::testing::TestParamInfo<Network::Address::IpVersion>& params) {
     return params.param == Network::Address::IpVersion::v4 ? "IPv4" : "IPv6";
   }
 
@@ -301,15 +307,74 @@ public:
     return result;
   }
 
+  static absl::Time parseTime(const std::string& input, const std::string& input_format);
+  static std::string formatTime(const absl::Time input, const std::string& output_format);
+  static std::string formatTime(const SystemTime input, const std::string& output_format);
+  static std::string convertTime(const std::string& input, const std::string& input_format,
+                                 const std::string& output_format);
+
   static constexpr std::chrono::milliseconds DefaultTimeout = std::chrono::milliseconds(10000);
 
   static void renameFile(const std::string& old_name, const std::string& new_name);
   static void createDirectory(const std::string& name);
   static void createSymlink(const std::string& target, const std::string& link);
+
+  /**
+   * Return a prefix string matcher.
+   * @param string prefix.
+   * @return Object StringMatcher.
+   */
+  static const envoy::type::matcher::StringMatcher createPrefixMatcher(std::string str) {
+    envoy::type::matcher::StringMatcher matcher;
+    matcher.set_prefix(str);
+    return matcher;
+  }
+
+  /**
+   * Return an exact string matcher.
+   * @param string exact.
+   * @return Object StringMatcher.
+   */
+  static const envoy::type::matcher::StringMatcher createExactMatcher(std::string str) {
+    envoy::type::matcher::StringMatcher matcher;
+    matcher.set_exact(str);
+    return matcher;
+  }
+
+  /**
+   * Return a regex string matcher.
+   * @param string exact.
+   * @return Object StringMatcher.
+   */
+  static const envoy::type::matcher::StringMatcher createRegexMatcher(std::string str) {
+    envoy::type::matcher::StringMatcher matcher;
+    matcher.set_regex(str);
+    return matcher;
+  }
+
+  /**
+   * Checks that passed gauges have a value of 0. Gauges can be omitted from
+   * this check by modifying the regex that matches gauge names in the
+   * implementation.
+   *
+   * @param vector of gauges to check.
+   * @return bool indicating that passed gauges not matching the omitted regex have a value of 0.
+   */
+  static bool gaugesZeroed(const std::vector<Stats::GaugeSharedPtr> gauges);
 };
 
 /**
- * This utility class wraps the common case of having a cross-thread "one shot" ready condition.
+ * Wraps the common case of having a cross-thread "one shot" ready condition.
+ *
+ * It functions like absl::Notification except the usage of notifyAll() appears
+ * to trigger tighter simultaneous wakeups in multiple threads, resulting in
+ * more contentions, e.g. for BM_CreateRace in
+ * ../common/stats/symbol_table_speed_test.cc.
+ *
+ * See
+ *     https://github.com/abseil/abseil-cpp/blob/master/absl/synchronization/notification.h
+ * for the absl impl, which appears to result in fewer contentions (and in
+ * tests we want contentions).
  */
 class ConditionalInitializer {
 public:
@@ -325,19 +390,17 @@ public:
    */
   void waitReady();
 
+  /**
+   * Waits until ready; does not reset it. This variation is immune to spurious
+   * condvar wakeups, and is also suitable for having multiple threads wait on
+   * a common condition.
+   */
+  void wait();
+
 private:
   Thread::CondVar cv_;
   Thread::MutexBasicLockable mutex_;
   bool ready_{false};
-};
-
-class ScopedFdCloser {
-public:
-  ScopedFdCloser(int fd);
-  ~ScopedFdCloser();
-
-private:
-  int fd_;
 };
 
 /**
@@ -396,60 +459,73 @@ public:
   bool has(const LowerCaseString& key);
 };
 
+// Helper method to create a header map from an initializer list. Useful due to make_unique's
+// inability to infer the initializer list type.
+inline HeaderMapPtr
+makeHeaderMap(const std::initializer_list<std::pair<std::string, std::string>>& values) {
+  return std::make_unique<TestHeaderMapImpl,
+                          const std::initializer_list<std::pair<std::string, std::string>>&>(
+      values);
+}
+
 } // namespace Http
 
 namespace Stats {
 
 /**
- * This is a heap test allocator that works similar to how the shared memory allocator works in
- * terms of reference counting, etc.
+ * Implements a RawStatDataAllocator using a contiguous block of heap-allocated
+ * memory, but is otherwise identical to the shared memory allocator in terms of
+ * reference counting, data structures, etc.
  */
 class TestAllocator : public RawStatDataAllocator {
 public:
-  TestAllocator(const StatsOptions& stats_options) : stats_options_(stats_options) {}
-  ~TestAllocator() { EXPECT_TRUE(stats_.empty()); }
-
-  RawStatData* alloc(absl::string_view name) override {
-    CSmartPtr<RawStatData, freeAdapter>& stat_ref = stats_[std::string(name)];
-    if (!stat_ref) {
-      stat_ref.reset(static_cast<RawStatData*>(
-          ::calloc(RawStatData::structSizeWithOptions(stats_options_), 1)));
-      stat_ref->initialize(name, stats_options_);
-    } else {
-      stat_ref->ref_count_++;
+  struct TestBlockMemoryHashSetOptions : public BlockMemoryHashSetOptions {
+    TestBlockMemoryHashSetOptions() {
+      capacity = 200;
+      num_slots = 131;
     }
+  };
 
-    return stat_ref.get();
-  }
-
-  void free(RawStatData& data) override {
-    if (--data.ref_count_ > 0) {
-      return;
-    }
-
-    if (stats_.erase(std::string(data.name_)) == 0) {
-      FAIL();
-    }
-  }
+  TestAllocator(const StatsOptions& stats_options, SymbolTable& symbol_table)
+      : RawStatDataAllocator(mutex_, hash_set_, stats_options, symbol_table),
+        block_memory_(std::make_unique<uint8_t[]>(
+            RawStatDataSet::numBytes(block_hash_options_, stats_options))),
+        hash_set_(block_hash_options_, true /* init */, block_memory_.get(), stats_options) {}
+  ~TestAllocator() { EXPECT_EQ(0, hash_set_.size()); }
 
 private:
-  static void freeAdapter(RawStatData* data) { ::free(data); }
-  std::unordered_map<std::string, CSmartPtr<RawStatData, freeAdapter>> stats_;
-  const StatsOptions& stats_options_;
+  FakeSymbolTableImpl symbol_table_;
+  Thread::MutexBasicLockable mutex_;
+  TestBlockMemoryHashSetOptions block_hash_options_;
+  std::unique_ptr<uint8_t[]> block_memory_;
+  RawStatDataSet hash_set_;
 };
 
-class MockedTestAllocator : public RawStatDataAllocator {
+class MockedTestAllocator : public TestAllocator {
 public:
-  MockedTestAllocator(const StatsOptions& stats_options);
+  MockedTestAllocator(const StatsOptions& stats_options, SymbolTable& symbol_table);
   virtual ~MockedTestAllocator();
 
   MOCK_METHOD1(alloc, RawStatData*(absl::string_view name));
   MOCK_METHOD1(free, void(RawStatData& data));
-
-  TestAllocator alloc_;
 };
 
 } // namespace Stats
+
+namespace Thread {
+ThreadFactory& threadFactoryForTest();
+} // namespace Thread
+
+namespace Filesystem {
+Instance& fileSystemForTest();
+} // namespace Filesystem
+
+namespace Api {
+ApiPtr createApiForTest();
+ApiPtr createApiForTest(Stats::Store& stat_store);
+ApiPtr createApiForTest(Event::TimeSystem& time_system);
+ApiPtr createApiForTest(Stats::Store& stat_store, Event::TimeSystem& time_system);
+} // namespace Api
 
 MATCHER_P(HeaderMapEqualIgnoreOrder, rhs, "") {
   *result_listener << *rhs << " is not equal to " << *arg;

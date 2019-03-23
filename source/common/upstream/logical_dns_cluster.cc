@@ -110,10 +110,9 @@ void LogicalDnsCluster::startResolve() {
               break;
             }
             const auto& locality_lb_endpoint = localityLbEndpoint();
-            PriorityStateManager priority_state_manager(*this, local_info_);
+            PriorityStateManager priority_state_manager(*this, local_info_, nullptr);
             priority_state_manager.initializePriorityFor(locality_lb_endpoint);
-            priority_state_manager.registerHostForPriority(logical_host_, locality_lb_endpoint,
-                                                           lbEndpoint(), absl::nullopt);
+            priority_state_manager.registerHostForPriority(logical_host_, locality_lb_endpoint);
 
             const uint32_t priority = locality_lb_endpoint.priority();
             priority_state_manager.updateClusterPrioritySet(
@@ -141,16 +140,32 @@ void LogicalDnsCluster::startResolve() {
 }
 
 Upstream::Host::CreateConnectionData LogicalDnsCluster::LogicalHost::createConnection(
-    Event::Dispatcher& dispatcher,
-    const Network::ConnectionSocket::OptionsSharedPtr& options) const {
+    Event::Dispatcher& dispatcher, const Network::ConnectionSocket::OptionsSharedPtr& options,
+    Network::TransportSocketOptionsSharedPtr transport_socket_options) const {
   PerThreadCurrentHostData& data = parent_.tls_->getTyped<PerThreadCurrentHostData>();
   ASSERT(data.current_resolved_address_);
   return {HostImpl::createConnection(dispatcher, *parent_.info_, data.current_resolved_address_,
-                                     options),
+                                     options, transport_socket_options),
           HostDescriptionConstSharedPtr{
               new RealHostDescription(data.current_resolved_address_, parent_.localityLbEndpoint(),
                                       parent_.lbEndpoint(), shared_from_this())}};
 }
+
+ClusterImplBaseSharedPtr LogicalDnsClusterFactory::createClusterImpl(
+    const envoy::api::v2::Cluster& cluster, ClusterFactoryContext& context,
+    Server::Configuration::TransportSocketFactoryContext& socket_factory_context,
+    Stats::ScopePtr&& stats_scope) {
+  auto selected_dns_resolver = selectDnsResolver(cluster, context);
+
+  return std::make_unique<LogicalDnsCluster>(cluster, context.runtime(), selected_dns_resolver,
+                                             context.tls(), socket_factory_context,
+                                             std::move(stats_scope), context.addedViaApi());
+}
+
+/**
+ * Static registration for the strict dns cluster factory. @see RegisterFactory.
+ */
+REGISTER_FACTORY(LogicalDnsClusterFactory, ClusterFactory);
 
 } // namespace Upstream
 } // namespace Envoy

@@ -20,6 +20,7 @@ namespace Extensions {
 namespace Filters {
 namespace Common {
 namespace ExtAuthz {
+namespace {
 
 class CheckRequestUtilsTest : public testing::Test {
 public:
@@ -34,13 +35,13 @@ public:
   NiceMock<Envoy::Http::MockStreamDecoderFilterCallbacks> callbacks_;
   NiceMock<Envoy::Network::MockReadFilterCallbacks> net_callbacks_;
   NiceMock<Envoy::Network::MockConnection> connection_;
-  NiceMock<Envoy::Ssl::MockConnection> ssl_;
+  NiceMock<Envoy::Ssl::MockConnectionInfo> ssl_;
   NiceMock<Envoy::StreamInfo::MockStreamInfo> req_info_;
 };
 
 // Verify that createTcpCheck's dependencies are invoked when it's called.
 TEST_F(CheckRequestUtilsTest, BasicTcp) {
-  envoy::service::auth::v2alpha::CheckRequest request;
+  envoy::service::auth::v2::CheckRequest request;
   EXPECT_CALL(net_callbacks_, connection()).Times(2).WillRepeatedly(ReturnRef(connection_));
   EXPECT_CALL(connection_, remoteAddress()).WillOnce(ReturnRef(addr_));
   EXPECT_CALL(connection_, localAddress()).WillOnce(ReturnRef(addr_));
@@ -52,7 +53,7 @@ TEST_F(CheckRequestUtilsTest, BasicTcp) {
 // Verify that createHttpCheck's dependencies are invoked when it's called.
 TEST_F(CheckRequestUtilsTest, BasicHttp) {
   Http::HeaderMapImpl headers;
-  envoy::service::auth::v2alpha::CheckRequest request;
+  envoy::service::auth::v2::CheckRequest request;
   EXPECT_CALL(callbacks_, connection()).Times(2).WillRepeatedly(Return(&connection_));
   EXPECT_CALL(connection_, remoteAddress()).WillOnce(ReturnRef(addr_));
   EXPECT_CALL(connection_, localAddress()).WillOnce(ReturnRef(addr_));
@@ -60,8 +61,9 @@ TEST_F(CheckRequestUtilsTest, BasicHttp) {
   EXPECT_CALL(callbacks_, streamId()).WillOnce(Return(0));
   EXPECT_CALL(callbacks_, streamInfo()).Times(3).WillRepeatedly(ReturnRef(req_info_));
   EXPECT_CALL(req_info_, protocol()).Times(2).WillRepeatedly(ReturnPointee(&protocol_));
+  Protobuf::Map<ProtobufTypes::String, ProtobufTypes::String> empty;
 
-  CheckRequestUtils::createHttpCheck(&callbacks_, headers, request);
+  CheckRequestUtils::createHttpCheck(&callbacks_, headers, std::move(empty), request);
 }
 
 // Verify that createHttpCheck extract the proper attributes from the http request into CheckRequest
@@ -69,7 +71,7 @@ TEST_F(CheckRequestUtilsTest, BasicHttp) {
 TEST_F(CheckRequestUtilsTest, CheckAttrContextPeer) {
   Http::TestHeaderMapImpl request_headers{{"x-envoy-downstream-service-cluster", "foo"},
                                           {":path", "/bar"}};
-  envoy::service::auth::v2alpha::CheckRequest request;
+  envoy::service::auth::v2::CheckRequest request;
   EXPECT_CALL(callbacks_, connection()).WillRepeatedly(Return(&connection_));
   EXPECT_CALL(connection_, remoteAddress()).WillRepeatedly(ReturnRef(addr_));
   EXPECT_CALL(connection_, localAddress()).WillRepeatedly(ReturnRef(addr_));
@@ -77,16 +79,23 @@ TEST_F(CheckRequestUtilsTest, CheckAttrContextPeer) {
   EXPECT_CALL(callbacks_, streamId()).WillRepeatedly(Return(0));
   EXPECT_CALL(callbacks_, streamInfo()).WillRepeatedly(ReturnRef(req_info_));
   EXPECT_CALL(req_info_, protocol()).WillRepeatedly(ReturnPointee(&protocol_));
-  EXPECT_CALL(ssl_, uriSanPeerCertificate()).WillOnce(Return("source"));
-  EXPECT_CALL(ssl_, uriSanLocalCertificate()).WillOnce(Return("destination"));
+  EXPECT_CALL(ssl_, uriSanPeerCertificate()).WillOnce(Return(std::vector<std::string>{"source"}));
+  EXPECT_CALL(ssl_, uriSanLocalCertificate())
+      .WillOnce(Return(std::vector<std::string>{"destination"}));
 
-  CheckRequestUtils::createHttpCheck(&callbacks_, request_headers, request);
+  Protobuf::Map<ProtobufTypes::String, ProtobufTypes::String> context_extensions;
+  context_extensions["key"] = "value";
+
+  CheckRequestUtils::createHttpCheck(&callbacks_, request_headers, std::move(context_extensions),
+                                     request);
 
   EXPECT_EQ("source", request.attributes().source().principal());
   EXPECT_EQ("destination", request.attributes().destination().principal());
   EXPECT_EQ("foo", request.attributes().source().service());
+  EXPECT_EQ("value", request.attributes().context_extensions().at("key"));
 }
 
+} // namespace
 } // namespace ExtAuthz
 } // namespace Common
 } // namespace Filters

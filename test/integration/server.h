@@ -85,17 +85,22 @@ public:
     return wrapped_scope_->gauge(name);
   }
 
+  NullGaugeImpl& nullGauge(const std::string&) override { return null_gauge_; }
+
   Histogram& histogram(const std::string& name) override {
     Thread::LockGuard lock(lock_);
     return wrapped_scope_->histogram(name);
   }
 
+  const SymbolTable& symbolTable() const override { return wrapped_scope_->symbolTable(); }
+  SymbolTable& symbolTable() override { return wrapped_scope_->symbolTable(); }
   const StatsOptions& statsOptions() const override { return stats_options_; }
 
 private:
   Thread::MutexBasicLockable& lock_;
   ScopePtr wrapped_scope_;
   StatsOptionsImpl stats_options_;
+  NullGaugeImpl null_gauge_;
 };
 
 /**
@@ -119,6 +124,7 @@ public:
     Thread::LockGuard lock(lock_);
     return store_.gauge(name);
   }
+  NullGaugeImpl& nullGauge(const std::string&) override { return null_gauge_; }
   Histogram& histogram(const std::string& name) override {
     Thread::LockGuard lock(lock_);
     return store_.histogram(name);
@@ -149,11 +155,15 @@ public:
   void mergeHistograms(PostMergeCb) override {}
   Source& source() override { return source_; }
 
+  const SymbolTable& symbolTable() const override { return store_.symbolTable(); }
+  SymbolTable& symbolTable() override { return store_.symbolTable(); }
+
 private:
   mutable Thread::MutexBasicLockable lock_;
   IsolatedStoreImpl store_;
   SourceImpl source_;
   StatsOptionsImpl stats_options_;
+  NullGaugeImpl null_gauge_;
 };
 
 } // namespace Stats
@@ -163,31 +173,38 @@ typedef std::unique_ptr<IntegrationTestServer> IntegrationTestServerPtr;
 
 /**
  * Wrapper for running the real server for the purpose of integration tests.
+ * This class is an Abstract Base Class and delegates ownership and management
+ * of the actual envoy server to a derived class. See the documentation for
+ * createAndRunEnvoyServer().
  */
-class IntegrationTestServer : Logger::Loggable<Logger::Id::testing>,
+class IntegrationTestServer : public Logger::Loggable<Logger::Id::testing>,
                               public TestHooks,
                               public IntegrationTestServerStats,
                               public Server::ComponentFactory {
 public:
   static IntegrationTestServerPtr create(const std::string& config_path,
                                          const Network::Address::IpVersion version,
-                                         std::function<void()> pre_worker_start_test_steps,
-                                         bool deterministic, Event::TestTimeSystem& time_system);
+                                         std::function<void()> on_server_init_function,
+                                         bool deterministic, Event::TestTimeSystem& time_system,
+                                         Api::Api& api, bool defer_listener_finalization = false);
+  // Note that the derived class is responsible for tearing down the server in its
+  // destructor.
   ~IntegrationTestServer();
 
+  void waitUntilListenersReady();
+
   Server::TestDrainManager& drainManager() { return *drain_manager_; }
-  Server::InstanceImpl& server() {
-    RELEASE_ASSERT(server_ != nullptr, "");
-    return *server_;
-  }
   void setOnWorkerListenerAddedCb(std::function<void()> on_worker_listener_added) {
-    on_worker_listener_added_cb_ = on_worker_listener_added;
+    on_worker_listener_added_cb_ = std::move(on_worker_listener_added);
   }
   void setOnWorkerListenerRemovedCb(std::function<void()> on_worker_listener_removed) {
-    on_worker_listener_removed_cb_ = on_worker_listener_removed;
+    on_worker_listener_removed_cb_ = std::move(on_worker_listener_removed);
   }
+  void onRuntimeCreated() override;
+
   void start(const Network::Address::IpVersion version,
-             std::function<void()> pre_worker_start_test_steps, bool deterministic);
+             std::function<void()> on_server_init_function, bool deterministic,
+             bool defer_listener_finalization);
 
   void waitForCounterGe(const std::string& name, uint64_t value) override {
     while (counter(name) == nullptr || counter(name)->value() < value) {
@@ -210,18 +227,18 @@ public:
   Stats::CounterSharedPtr counter(const std::string& name) override {
     // When using the thread local store, only counters() is thread safe. This also allows us
     // to test if a counter exists at all versus just defaulting to zero.
-    return TestUtility::findCounter(*stat_store_, name);
+    return TestUtility::findCounter(stat_store(), name);
   }
 
   Stats::GaugeSharedPtr gauge(const std::string& name) override {
     // When using the thread local store, only gauges() is thread safe. This also allows us
     // to test if a counter exists at all versus just defaulting to zero.
-    return TestUtility::findGauge(*stat_store_, name);
+    return TestUtility::findGauge(stat_store(), name);
   }
 
-  std::vector<Stats::CounterSharedPtr> counters() override { return stat_store_->counters(); }
+  std::vector<Stats::CounterSharedPtr> counters() override { return stat_store().counters(); }
 
-  std::vector<Stats::GaugeSharedPtr> gauges() override { return stat_store_->gauges(); }
+  std::vector<Stats::GaugeSharedPtr> gauges() override { return stat_store().gauges(); }
 
   // TestHooks
   void onWorkerListenerAdded() override;
@@ -237,9 +254,30 @@ public:
     return Server::InstanceUtil::createRuntime(server, config);
   }
 
+  // Should not be called until createAndRunEnvoyServer() is called.
+  virtual Server::Instance& server() PURE;
+  virtual Stats::Store& stat_store() PURE;
+  virtual Network::Address::InstanceConstSharedPtr admin_address() PURE;
+
 protected:
-  IntegrationTestServer(Event::TestTimeSystem& time_system, const std::string& config_path)
-      : time_system_(time_system), config_path_(config_path) {}
+  IntegrationTestServer(Event::TestTimeSystem& time_system, Api::Api& api,
+                        const std::string& config_path)
+      : time_system_(time_system), api_(api), config_path_(config_path) {}
+
+  // Create the running envoy server. This function will call serverReady() when the virtual
+  // functions server(), stat_store(), and admin_address() may be called, but before the server
+  // has been started.
+  // The subclass is also responsible for tearing down this server in its destructor.
+  virtual void createAndRunEnvoyServer(OptionsImpl& options, Event::TimeSystem& time_system,
+                                       Network::Address::InstanceConstSharedPtr local_address,
+                                       TestHooks& hooks, Thread::BasicLockable& access_log_lock,
+                                       Server::ComponentFactory& component_factory,
+                                       Runtime::RandomGeneratorPtr&& random_generator) PURE;
+
+  // Will be called by subclass on server thread when the server is ready to be accessed. The
+  // server may not have been run yet, but all server access methods (server(), stat_store(),
+  // adminAddress()) will be available.
+  void serverReady();
 
 private:
   /**
@@ -248,19 +286,50 @@ private:
   void threadRoutine(const Network::Address::IpVersion version, bool deterministic);
 
   Event::TestTimeSystem& time_system_;
+  Api::Api& api_;
   const std::string config_path_;
   Thread::ThreadPtr thread_;
   Thread::CondVar listeners_cv_;
   Thread::MutexBasicLockable listeners_mutex_;
   uint64_t pending_listeners_;
   ConditionalInitializer server_set_;
-  std::unique_ptr<Server::InstanceImpl> server_;
   Server::TestDrainManager* drain_manager_{};
-  Stats::Store* stat_store_{};
   std::function<void()> on_worker_listener_added_cb_;
   std::function<void()> on_worker_listener_removed_cb_;
-  Network::Address::InstanceConstSharedPtr admin_address_;
   TcpDumpPtr tcp_dump_;
+};
+
+// Default implementation of IntegrationTestServer
+class IntegrationTestServerImpl : public IntegrationTestServer {
+public:
+  IntegrationTestServerImpl(Event::TestTimeSystem& time_system, Api::Api& api,
+                            const std::string& config_path)
+      : IntegrationTestServer(time_system, api, config_path) {}
+
+  ~IntegrationTestServerImpl() override;
+
+  Server::Instance& server() override {
+    RELEASE_ASSERT(server_ != nullptr, "");
+    return *server_;
+  }
+  Stats::Store& stat_store() override {
+    RELEASE_ASSERT(stat_store_ != nullptr, "");
+    return *stat_store_;
+  }
+  Network::Address::InstanceConstSharedPtr admin_address() override { return admin_address_; }
+
+private:
+  void createAndRunEnvoyServer(OptionsImpl& options, Event::TimeSystem& time_system,
+                               Network::Address::InstanceConstSharedPtr local_address,
+                               TestHooks& hooks, Thread::BasicLockable& access_log_lock,
+                               Server::ComponentFactory& component_factory,
+                               Runtime::RandomGeneratorPtr&& random_generator) override;
+
+  // Owned by this class. An owning pointer is not used because the actual allocation is done
+  // on a stack in a non-main thread.
+  Server::Instance* server_{};
+  Stats::Store* stat_store_{};
+  Network::Address::InstanceConstSharedPtr admin_address_;
 };
 
 } // namespace Envoy

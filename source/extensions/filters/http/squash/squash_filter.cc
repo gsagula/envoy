@@ -153,7 +153,8 @@ Http::FilterHeadersStatus SquashFilter::decodeHeaders(Http::HeaderMap& headers, 
   is_squashing_ = true;
   in_flight_request_ =
       cm_.httpAsyncClientForCluster(config_->clusterName())
-          .send(std::move(request), create_attachment_callback_, config_->requestTimeout());
+          .send(std::move(request), create_attachment_callback_,
+                Http::AsyncClient::RequestOptions().setTimeout(config_->requestTimeout()));
 
   if (in_flight_request_ == nullptr) {
     ENVOY_LOG(debug, "Squash: can't create request for squash server");
@@ -223,7 +224,7 @@ void SquashFilter::onCreateAttachmentFailure(Http::AsyncClient::FailureReason) {
   bool request_created = in_flight_request_ != nullptr;
   in_flight_request_ = nullptr;
 
-  // No retries here, as we couldnt create the attachment object.
+  // No retries here, as we couldn't create the attachment object.
   if (request_created) {
     // Cleanup not needed if onFailure called inline in async client send, as this means that
     // decodeHeaders is down the stack and will return Continue.
@@ -272,7 +273,8 @@ void SquashFilter::pollForAttachment() {
 
   in_flight_request_ =
       cm_.httpAsyncClientForCluster(config_->clusterName())
-          .send(std::move(request), check_attachment_callback_, config_->requestTimeout());
+          .send(std::move(request), check_attachment_callback_,
+                Http::AsyncClient::RequestOptions().setTimeout(config_->requestTimeout()));
   // No need to check if in_flight_request_ is null as onFailure will take care of
   // cleanup.
 }

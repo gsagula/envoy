@@ -37,6 +37,19 @@ bool Utility::reconstituteCrumbledCookies(const HeaderString& key, const HeaderS
   return true;
 }
 
+void initializeNghttp2Logging() {
+  nghttp2_set_debug_vprintf_callback([](const char* format, va_list args) {
+    char buf[2048];
+    const int n = ::vsnprintf(buf, sizeof(buf), format, args);
+    // nghttp2 inserts new lines, but we also insert a new line in the ENVOY_LOG
+    // below, so avoid double \n.
+    if (n >= 1 && static_cast<size_t>(n) < sizeof(buf) && buf[n - 1] == '\n') {
+      buf[n - 1] = '\0';
+    }
+    ENVOY_LOG_TO_LOGGER(Logger::Registry::getLog(Logger::Id::http2), trace, "nghttp2: {}", buf);
+  });
+}
+
 ConnectionImpl::Http2Callbacks ConnectionImpl::http2_callbacks_;
 
 /**
@@ -130,6 +143,25 @@ void ConnectionImpl::StreamImpl::encodeTrailers(const HeaderMap& trailers) {
     parent_.sendPendingFrames();
   }
 }
+
+void ConnectionImpl::StreamImpl::encodeMetadata(const MetadataMapVector& metadata_map_vector) {
+  ASSERT(parent_.allow_metadata_);
+
+  getMetadataEncoder().createPayload(metadata_map_vector);
+
+  // Estimates the number of frames to generate, and breaks the while loop when the size is reached
+  // in case submitting succeeds and packing fails, and we don't get error from packing.
+  const size_t frame_count = metadata_encoder_->frameCountUpperBound();
+  size_t count = 0;
+  // Keep submitting extension frames if there is payload left in the encoder.
+  while (metadata_encoder_->hasNextFrame() && count++ <= frame_count) {
+    submitMetadata();
+    parent_.sendPendingFrames();
+  }
+
+  ASSERT(!metadata_encoder_->hasNextFrame());
+}
+
 void ConnectionImpl::StreamImpl::readDisable(bool disable) {
   ENVOY_CONN_LOG(debug, "Stream {} {}, unconsumed_bytes {} read_disable_count {}",
                  parent_.connection_, stream_id_, (disable ? "disabled" : "enabled"),
@@ -192,6 +224,14 @@ void ConnectionImpl::StreamImpl::submitTrailers(const HeaderMap& trailers) {
   int rc =
       nghttp2_submit_trailer(parent_.session_, stream_id_, &final_headers[0], final_headers.size());
   ASSERT(rc == 0);
+}
+
+void ConnectionImpl::StreamImpl::submitMetadata() {
+  ASSERT(stream_id_ > 0);
+  const int result =
+      nghttp2_submit_extension(parent_.session_, METADATA_FRAME_TYPE,
+                               metadata_encoder_->nextEndMetadata(), stream_id_, nullptr);
+  ASSERT(result == 0);
 }
 
 ssize_t ConnectionImpl::StreamImpl::onDataSourceRead(uint64_t length, uint32_t* data_flags) {
@@ -284,6 +324,27 @@ void ConnectionImpl::StreamImpl::resetStreamWorker(StreamResetReason reason) {
                                          ? NGHTTP2_REFUSED_STREAM
                                          : NGHTTP2_NO_ERROR);
   ASSERT(rc == 0);
+}
+
+MetadataEncoder& ConnectionImpl::StreamImpl::getMetadataEncoder() {
+  if (metadata_encoder_ == nullptr) {
+    metadata_encoder_ = std::make_unique<MetadataEncoder>();
+  }
+  return *metadata_encoder_;
+}
+
+MetadataDecoder& ConnectionImpl::StreamImpl::getMetadataDecoder() {
+  if (metadata_decoder_ == nullptr) {
+    auto cb = [this](MetadataMapPtr&& metadata_map_ptr) {
+      this->onMetadataDecoded(std::move(metadata_map_ptr));
+    };
+    metadata_decoder_ = std::make_unique<MetadataDecoder>(cb);
+  }
+  return *metadata_decoder_;
+}
+
+void ConnectionImpl::StreamImpl::onMetadataDecoded(MetadataMapPtr&& metadata_map_ptr) {
+  decoder_->decodeMetadata(std::move(metadata_map_ptr));
 }
 
 ConnectionImpl::~ConnectionImpl() { nghttp2_session_del(session_); }
@@ -484,7 +545,8 @@ int ConnectionImpl::onFrameSend(const nghttp2_frame* frame) {
 }
 
 int ConnectionImpl::onInvalidFrame(int32_t stream_id, int error_code) {
-  ENVOY_CONN_LOG(debug, "invalid frame: {}", connection_, nghttp2_strerror(error_code));
+  ENVOY_CONN_LOG(debug, "invalid frame: {} on stream {}", connection_, nghttp2_strerror(error_code),
+                 stream_id);
 
   // The stream is about to be closed due to an invalid header or messaging. Don't kill the
   // entire connection if one stream has bad headers or messaging.
@@ -544,6 +606,40 @@ int ConnectionImpl::onStreamClose(int32_t stream_id, uint32_t error_code) {
   return 0;
 }
 
+int ConnectionImpl::onMetadataReceived(int32_t stream_id, const uint8_t* data, size_t len) {
+  ENVOY_CONN_LOG(trace, "recv {} bytes METADATA", connection_, len);
+
+  StreamImpl* stream = getStream(stream_id);
+  if (!stream) {
+    return 0;
+  }
+
+  bool success = stream->getMetadataDecoder().receiveMetadata(data, len);
+  return success ? 0 : NGHTTP2_ERR_CALLBACK_FAILURE;
+}
+
+int ConnectionImpl::onMetadataFrameComplete(int32_t stream_id, bool end_metadata) {
+  ENVOY_CONN_LOG(trace, "recv METADATA frame on stream {}, end_metadata: {}", connection_,
+                 stream_id, end_metadata);
+
+  StreamImpl* stream = getStream(stream_id);
+  ASSERT(stream != nullptr);
+
+  bool result = stream->getMetadataDecoder().onMetadataFrameComplete(end_metadata);
+  return result ? 0 : NGHTTP2_ERR_CALLBACK_FAILURE;
+}
+
+ssize_t ConnectionImpl::packMetadata(int32_t stream_id, uint8_t* buf, size_t len) {
+  ENVOY_CONN_LOG(trace, "pack METADATA frame on stream {}", connection_, stream_id);
+
+  StreamImpl* stream = getStream(stream_id);
+  ASSERT(stream != nullptr);
+
+  MetadataEncoder& encoder = stream->getMetadataEncoder();
+  const uint64_t payload_size = encoder.packNextFramePayload(buf, len);
+  return static_cast<ssize_t>(payload_size);
+}
+
 int ConnectionImpl::saveHeader(const nghttp2_frame* frame, HeaderString&& name,
                                HeaderString&& value) {
   StreamImpl* stream = getStream(frame->hd.stream_id);
@@ -559,7 +655,7 @@ int ConnectionImpl::saveHeader(const nghttp2_frame* frame, HeaderString&& name,
   }
 
   stream->saveHeader(std::move(name), std::move(value));
-  if (stream->headers_->byteSize() > StreamImpl::MAX_HEADER_SIZE) {
+  if (stream->headers_->byteSize() > max_request_headers_kb_ * 1024) {
     // This will cause the library to reset/close the stream.
     stats_.header_overflow_.inc();
     return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE;
@@ -736,6 +832,29 @@ ConnectionImpl::Http2Callbacks::Http2Callbacks() {
         return static_cast<ConnectionImpl*>(user_data)->onInvalidFrame(frame->hd.stream_id,
                                                                        error_code);
       });
+
+  nghttp2_session_callbacks_set_on_extension_chunk_recv_callback(
+      callbacks_,
+      [](nghttp2_session*, const nghttp2_frame_hd* hd, const uint8_t* data, size_t len,
+         void* user_data) -> int {
+        ASSERT(hd->length >= len);
+        return static_cast<ConnectionImpl*>(user_data)->onMetadataReceived(hd->stream_id, data,
+                                                                           len);
+      });
+
+  nghttp2_session_callbacks_set_unpack_extension_callback(
+      callbacks_, [](nghttp2_session*, void**, const nghttp2_frame_hd* hd, void* user_data) -> int {
+        return static_cast<ConnectionImpl*>(user_data)->onMetadataFrameComplete(
+            hd->stream_id, hd->flags == END_METADATA_FLAG);
+      });
+
+  nghttp2_session_callbacks_set_pack_extension_callback(
+      callbacks_,
+      [](nghttp2_session*, uint8_t* buf, size_t len, const nghttp2_frame* frame,
+         void* user_data) -> ssize_t {
+        ASSERT(frame->hd.length <= len);
+        return static_cast<ConnectionImpl*>(user_data)->packMetadata(frame->hd.stream_id, buf, len);
+      });
 }
 
 ConnectionImpl::Http2Callbacks::~Http2Callbacks() { nghttp2_session_callbacks_del(callbacks_); }
@@ -749,8 +868,16 @@ ConnectionImpl::Http2Options::Http2Options(const Http2Settings& http2_settings) 
   nghttp2_option_set_no_closed_streams(options_, 1);
   nghttp2_option_set_no_auto_window_update(options_, 1);
 
+  // The max send header block length is configured to an arbitrarily high number so as to never
+  // trigger the check within nghttp2, as we check request headers length in codec_impl::saveHeader.
+  nghttp2_option_set_max_send_header_block_length(options_, 0x2000000);
+
   if (http2_settings.hpack_table_size_ != NGHTTP2_DEFAULT_HEADER_TABLE_SIZE) {
     nghttp2_option_set_max_deflate_dynamic_table_size(options_, http2_settings.hpack_table_size_);
+  }
+
+  if (http2_settings.allow_metadata_) {
+    nghttp2_option_set_user_recv_extension_type(options_, METADATA_FRAME_TYPE);
   }
 }
 
@@ -768,12 +895,15 @@ ConnectionImpl::ClientHttp2Options::ClientHttp2Options(const Http2Settings& http
 
 ClientConnectionImpl::ClientConnectionImpl(Network::Connection& connection,
                                            Http::ConnectionCallbacks& callbacks,
-                                           Stats::Scope& stats, const Http2Settings& http2_settings)
-    : ConnectionImpl(connection, stats, http2_settings), callbacks_(callbacks) {
+                                           Stats::Scope& stats, const Http2Settings& http2_settings,
+                                           const uint32_t max_request_headers_kb)
+    : ConnectionImpl(connection, stats, http2_settings, max_request_headers_kb),
+      callbacks_(callbacks) {
   ClientHttp2Options client_http2_options(http2_settings);
   nghttp2_session_client_new2(&session_, http2_callbacks_.callbacks(), base(),
                               client_http2_options.options());
   sendSettings(http2_settings, true);
+  allow_metadata_ = http2_settings.allow_metadata_;
 }
 
 Http::StreamEncoder& ClientConnectionImpl::newStream(StreamDecoder& decoder) {
@@ -814,12 +944,15 @@ int ClientConnectionImpl::onHeader(const nghttp2_frame* frame, HeaderString&& na
 
 ServerConnectionImpl::ServerConnectionImpl(Network::Connection& connection,
                                            Http::ServerConnectionCallbacks& callbacks,
-                                           Stats::Scope& scope, const Http2Settings& http2_settings)
-    : ConnectionImpl(connection, scope, http2_settings), callbacks_(callbacks) {
+                                           Stats::Scope& scope, const Http2Settings& http2_settings,
+                                           const uint32_t max_request_headers_kb)
+    : ConnectionImpl(connection, scope, http2_settings, max_request_headers_kb),
+      callbacks_(callbacks) {
   Http2Options http2_options(http2_settings);
   nghttp2_session_server_new2(&session_, http2_callbacks_.callbacks(), base(),
                               http2_options.options());
   sendSettings(http2_settings, false);
+  allow_metadata_ = http2_settings.allow_metadata_;
 }
 
 int ServerConnectionImpl::onBeginHeaders(const nghttp2_frame* frame) {

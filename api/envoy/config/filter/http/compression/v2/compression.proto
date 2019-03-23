@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package envoy.config.filter.http.compression.v2alpha;
+option java_package = "io.envoyproxy.envoy.config.filter.http.compression.v2alpha";
+option java_multiple_files = true;
+option go_package = "v2alpha";
+
+import "google/protobuf/wrappers.proto";
+
+import "validate/validate.proto";
+import "gogoproto/gogo.proto";
+
+// [#protodoc-title: Compression]
+
+// Settings for compressing and decompressing stream decoder data.
+message StreamDecoder {
+  // Policies for compressing decode data.
+  repeated Policy compression = 1;
+
+  // Policies for decompressing decode data.
+  repeated Policy decompression = 2;
+}
+
+// Settings for compressing and decompressing stream encoder data.
+message StreamEncoder {
+  // Policies for compressing encode data.
+  repeated Policy compression = 1;
+
+  // Policies for dempressing encode data.
+  repeated Policy decompression = 2;
+}
+
+message Policy {
+  // Settings for the compression algorithm.
+  Algorithm algorithm = 1;
+  
+  // When supplied, it evaluate the Content-Type header for a match.
+  repeated HeaderMatcher content_type = 2;
+
+  // When supplied, it evaluate the Content-Length header for a match.
+  envoy.type.matcher.UIntMatcher content_length = 3;
+
+  // Strip off Accept-Enconding from the client headers.
+  bool remove_accept_encoding_header = 4;
+
+  // If true, disables compression when the response contains an etag header. When it is false, the
+  // filter will preserve weak etags and remove the ones that require strong validation.
+  bool disable_on_etag_header = 5;
+}
+
+message Algorithm {
+  oneof types {
+    // Settings for Gzip compression algorithm.
+    envoy.type.compression.Gzip gzip = 1;
+
+    // Other algorithm configurations go here...
+  }
+}
+
+message HeaderMatcher {
+  // Header key.
+  envoy.type.matcher.StringMatcher key = 1 [(validate.rules).string.min_bytes = 1];
+
+  // Header value.
+  oneof values {
+    option (validate.required) = true;
+    
+    // Match any key of type string.
+    envoy.type.matcher.StringMatcher value = 2 [(validate.rules).string.min_bytes = 1];
+
+    // When true, matches any value in the key. Otherwise rejects any value in the key.
+    bool key_matcher = 3;
+  }
+}

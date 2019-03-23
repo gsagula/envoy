@@ -34,6 +34,11 @@ std::string TsiSocket::protocol() const {
   return EMPTY_STRING;
 }
 
+absl::string_view TsiSocket::failureReason() const {
+  // TODO(htuch): Implement error reason for TSI.
+  return EMPTY_STRING;
+}
+
 Network::PostIoAction TsiSocket::doHandshake() {
   ASSERT(!handshake_complete_);
   ENVOY_CONN_LOG(debug, "TSI: doHandshake", callbacks_->connection());
@@ -249,7 +254,8 @@ TsiSocketFactory::TsiSocketFactory(HandshakerFactory handshaker_factory,
 
 bool TsiSocketFactory::implementsSecureTransport() const { return true; }
 
-Network::TransportSocketPtr TsiSocketFactory::createTransportSocket() const {
+Network::TransportSocketPtr
+TsiSocketFactory::createTransportSocket(Network::TransportSocketOptionsSharedPtr) const {
   return std::make_unique<TsiSocket>(handshaker_factory_, handshake_validator_);
 }
 

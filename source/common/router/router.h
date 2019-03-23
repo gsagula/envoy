@@ -40,7 +40,8 @@ namespace Router {
   COUNTER(no_cluster)                                                                              \
   COUNTER(rq_redirect)                                                                             \
   COUNTER(rq_direct_response)                                                                      \
-  COUNTER(rq_total)
+  COUNTER(rq_total)                                                                                \
+  COUNTER(rq_reset_after_downstream_response_started)
 // clang-format on
 
 /**
@@ -98,12 +99,12 @@ public:
                Stats::Scope& scope, Upstream::ClusterManager& cm, Runtime::Loader& runtime,
                Runtime::RandomGenerator& random, ShadowWriterPtr&& shadow_writer,
                bool emit_dynamic_stats, bool start_child_span, bool suppress_envoy_headers,
-               TimeSource& time_source)
+               TimeSource& time_source, Http::Context& http_context)
       : scope_(scope), local_info_(local_info), cm_(cm), runtime_(runtime),
         random_(random), stats_{ALL_ROUTER_STATS(POOL_COUNTER_PREFIX(scope, stat_prefix))},
         emit_dynamic_stats_(emit_dynamic_stats), start_child_span_(start_child_span),
-        suppress_envoy_headers_(suppress_envoy_headers), shadow_writer_(std::move(shadow_writer)),
-        time_source_(time_source) {}
+        suppress_envoy_headers_(suppress_envoy_headers), http_context_(http_context),
+        shadow_writer_(std::move(shadow_writer)), time_source_(time_source) {}
 
   FilterConfig(const std::string& stat_prefix, Server::Configuration::FactoryContext& context,
                ShadowWriterPtr&& shadow_writer,
@@ -112,7 +113,7 @@ public:
                      context.runtime(), context.random(), std::move(shadow_writer),
                      PROTOBUF_GET_WRAPPED_OR_DEFAULT(config, dynamic_stats, true),
                      config.start_child_span(), config.suppress_envoy_headers(),
-                     context.timeSource()) {
+                     context.api().timeSource(), context.httpContext()) {
     for (const auto& upstream_log : config.upstream_log()) {
       upstream_logs_.push_back(AccessLog::AccessLogFactory::fromProto(upstream_log, context));
     }
@@ -131,6 +132,7 @@ public:
   const bool start_child_span_;
   const bool suppress_envoy_headers_;
   std::list<AccessLog::InstanceSharedPtr> upstream_logs_;
+  Http::Context& http_context_;
 
 private:
   ShadowWriterPtr shadow_writer_;
@@ -148,7 +150,8 @@ class Filter : Logger::Loggable<Logger::Id::router>,
 public:
   Filter(FilterConfig& config)
       : config_(config), downstream_response_started_(false), downstream_end_stream_(false),
-        do_shadowing_(false), is_retry_(false) {}
+        do_shadowing_(false), is_retry_(false),
+        attempting_internal_redirect_with_complete_stream_(false) {}
 
   ~Filter();
 
@@ -216,9 +219,9 @@ public:
     return retry_state_->shouldSelectAnotherHost(host);
   }
 
-  const Upstream::PriorityLoad&
+  const Upstream::HealthyAndDegradedLoad&
   determinePriorityLoad(const Upstream::PrioritySet& priority_set,
-                        const Upstream::PriorityLoad& original_priority_load) override {
+                        const Upstream::HealthyAndDegradedLoad& original_priority_load) override {
     // We only modify the priority load on retries.
     if (!is_retry_) {
       return original_priority_load;
@@ -289,9 +292,11 @@ private:
     void decodeHeaders(Http::HeaderMapPtr&& headers, bool end_stream) override;
     void decodeData(Buffer::Instance& data, bool end_stream) override;
     void decodeTrailers(Http::HeaderMapPtr&& trailers) override;
+    void decodeMetadata(Http::MetadataMapPtr&& metadata_map) override;
 
     // Http::StreamCallbacks
-    void onResetStream(Http::StreamResetReason reason) override;
+    void onResetStream(Http::StreamResetReason reason,
+                       absl::string_view transport_failure_reason) override;
     void onAboveWriteBufferHighWatermark() override { disableDataFromDownstream(); }
     void onBelowWriteBufferLowWatermark() override { enableDataFromDownstream(); }
 
@@ -306,6 +311,7 @@ private:
 
     // Http::ConnectionPool::Callbacks
     void onPoolFailure(Http::ConnectionPool::PoolFailureReason reason,
+                       absl::string_view transport_failure_reason,
                        Upstream::HostDescriptionConstSharedPtr host) override;
     void onPoolReady(Http::StreamEncoder& request_encoder,
                      Upstream::HostDescriptionConstSharedPtr host) override;
@@ -337,6 +343,7 @@ private:
     DownstreamWatermarkManager downstream_watermark_manager_{*this};
     Tracing::SpanPtr span_;
     StreamInfo::StreamInfoImpl stream_info_;
+    StreamInfo::UpstreamTiming upstream_timing_;
     Http::HeaderMap* upstream_headers_{};
     Http::HeaderMap* upstream_trailers_{};
 
@@ -347,8 +354,6 @@ private:
   };
 
   typedef std::unique_ptr<UpstreamRequest> UpstreamRequestPtr;
-
-  enum class UpstreamResetType { Reset, GlobalTimeout, PerTryTimeout };
 
   StreamInfo::ResponseFlag streamResetReasonToResponseFlag(Http::StreamResetReason reset_reason);
 
@@ -366,22 +371,34 @@ private:
                                          Upstream::ResourcePriority priority) PURE;
   Http::ConnectionPool::Instance* getConnPool();
   void maybeDoShadowing();
+  bool maybeRetryReset(Http::StreamResetReason reset_reason);
+  void onPerTryTimeout();
   void onRequestComplete();
   void onResponseTimeout();
   void onUpstream100ContinueHeaders(Http::HeaderMapPtr&& headers);
+  // Handle an upstream request aborted due to a local timeout.
+  void onUpstreamTimeoutAbort(StreamInfo::ResponseFlag response_flag);
+  // Handle an "aborted" upstream request, meaning we didn't see response
+  // headers (e.g. due to a reset). Handles recording stats and responding
+  // downstream if appropriate.
+  void onUpstreamAbort(Http::Code code, StreamInfo::ResponseFlag response_flag,
+                       absl::string_view body, bool dropped);
   void onUpstreamHeaders(uint64_t response_code, Http::HeaderMapPtr&& headers, bool end_stream);
   void onUpstreamData(Buffer::Instance& data, bool end_stream);
   void onUpstreamTrailers(Http::HeaderMapPtr&& trailers);
+  void onUpstreamMetadata(Http::MetadataMapPtr&& metadata_map);
   void onUpstreamComplete();
-  void onUpstreamReset(UpstreamResetType type,
-                       const absl::optional<Http::StreamResetReason>& reset_reason);
+  void onUpstreamReset(Http::StreamResetReason reset_reason, absl::string_view transport_failure);
   void sendNoHealthyUpstreamResponse();
   bool setupRetry(bool end_stream);
+  bool setupRedirect(const Http::HeaderMap& headers);
+  void updateOutlierDetection(Http::Code code);
   void doRetry();
   // Called immediately after a non-5xx header is received from upstream, performs stats accounting
   // and handle difference between gRPC and non-gRPC requests.
   void handleNon5xxResponseHeaders(const Http::HeaderMap& headers, bool end_stream);
   TimeSource& timeSource() { return config_.timeSource(); }
+  Http::Context& httpContext() { return config_.http_context_; }
 
   FilterConfig& config_;
   Http::StreamDecoderFilterCallbacks* callbacks_{};
@@ -399,7 +416,6 @@ private:
   Http::HeaderMap* downstream_trailers_{};
   MonotonicTime downstream_request_complete_time_;
   uint32_t buffer_limit_{0};
-  bool stream_destroyed_{};
   MetadataMatchCriteriaConstPtr metadata_match_;
 
   // list of cookies to add to upstream headers
@@ -410,6 +426,7 @@ private:
   bool do_shadowing_ : 1;
   bool is_retry_ : 1;
   bool include_attempt_count_ : 1;
+  bool attempting_internal_redirect_with_complete_stream_ : 1;
   uint32_t attempt_count_{1};
 };
 

@@ -35,6 +35,8 @@ public:
   MOCK_CONST_METHOD0(defaultSubset, const ProtobufWkt::Struct&());
   MOCK_CONST_METHOD0(subsetKeys, const std::vector<std::set<std::string>>&());
   MOCK_CONST_METHOD0(localityWeightAware, bool());
+  MOCK_CONST_METHOD0(scaleLocalityWeight, bool());
+  MOCK_CONST_METHOD0(panicModeAny, bool());
 
   std::vector<std::set<std::string>> subset_keys_;
 };
@@ -63,6 +65,8 @@ public:
   MOCK_CONST_METHOD0(type, envoy::api::v2::Cluster::DiscoveryType());
   MOCK_CONST_METHOD0(lbRingHashConfig,
                      const absl::optional<envoy::api::v2::Cluster::RingHashLbConfig>&());
+  MOCK_CONST_METHOD0(lbLeastRequestConfig,
+                     const absl::optional<envoy::api::v2::Cluster::LeastRequestLbConfig>&());
   MOCK_CONST_METHOD0(lbOriginalDstConfig,
                      const absl::optional<envoy::api::v2::Cluster::OriginalDstLbConfig>&());
   MOCK_CONST_METHOD0(maintenanceMode, bool());
@@ -79,8 +83,10 @@ public:
   MOCK_CONST_METHOD0(typedMetadata, const Envoy::Config::TypedMetadata&());
   MOCK_CONST_METHOD0(clusterSocketOptions, const Network::ConnectionSocket::OptionsSharedPtr&());
   MOCK_CONST_METHOD0(drainConnectionsOnHostRemoval, bool());
+  MOCK_CONST_METHOD0(eds_service_name, absl::optional<std::string>());
 
   std::string name_{"fake_cluster"};
+  absl::optional<std::string> eds_service_name_;
   Http::Http2Settings http2_settings_{};
   ProtocolOptionsConfigConstSharedPtr extension_protocol_options_;
   uint64_t max_requests_per_connection_{};

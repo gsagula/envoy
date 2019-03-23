@@ -12,8 +12,9 @@ namespace Grpc {
 namespace {
 
 // Parameterize the loopback test server socket address and gRPC client type.
-INSTANTIATE_TEST_CASE_P(IpVersionsClientType, GrpcClientIntegrationTest,
-                        GRPC_CLIENT_INTEGRATION_PARAMS);
+INSTANTIATE_TEST_SUITE_P(IpVersionsClientType, GrpcClientIntegrationTest,
+                         GRPC_CLIENT_INTEGRATION_PARAMS,
+                         GrpcClientIntegrationParamTest::protocolTestParamsToString);
 
 // Validate that a simple request-reply stream works.
 TEST_P(GrpcClientIntegrationTest, BasicStream) {
@@ -271,8 +272,8 @@ TEST_P(GrpcClientIntegrationTest, RequestTrailersOnly) {
   initialize();
   auto request = createRequest(empty_metadata_);
   const Http::TestHeaderMapImpl reply_headers{{":status", "200"}, {"grpc-status", "0"}};
-  EXPECT_CALL(*request->child_span_, setTag(Tracing::Tags::get().GRPC_STATUS_CODE, "0"));
-  EXPECT_CALL(*request->child_span_, setTag(Tracing::Tags::get().ERROR, Tracing::Tags::get().TRUE));
+  EXPECT_CALL(*request->child_span_, setTag(Tracing::Tags::get().GrpcStatusCode, "0"));
+  EXPECT_CALL(*request->child_span_, setTag(Tracing::Tags::get().Error, Tracing::Tags::get().True));
   EXPECT_CALL(*request, onFailure(Status::Internal, "", _)).WillExitIfNeeded();
   dispatcher_helper_.setStreamEventPending();
   EXPECT_CALL(*request->child_span_, finishSpan());
@@ -289,6 +290,26 @@ TEST_P(GrpcClientIntegrationTest, ResourceExhaustedError) {
   dispatcher_helper_.runDispatcher();
   stream->sendServerTrailers(Status::GrpcStatus::ResourceExhausted, "error message",
                              empty_metadata_);
+  dispatcher_helper_.runDispatcher();
+}
+
+// Validate that a trailers Unauthenticated reply is handled.
+TEST_P(GrpcClientIntegrationTest, UnauthenticatedError) {
+  initialize();
+  auto stream = createStream(empty_metadata_);
+  stream->sendServerInitialMetadata(empty_metadata_);
+  stream->sendServerTrailers(Status::GrpcStatus::Unauthenticated, "error message", empty_metadata_);
+  dispatcher_helper_.runDispatcher();
+}
+
+// Validate that a trailers reply is still handled even if a grpc status code larger than
+// MaximumValid, is handled.
+TEST_P(GrpcClientIntegrationTest, MaximumValidPlusOne) {
+  initialize();
+  auto stream = createStream(empty_metadata_);
+  stream->sendServerInitialMetadata(empty_metadata_);
+  stream->sendServerTrailers(static_cast<Status::GrpcStatus>(Status::GrpcStatus::MaximumValid + 1),
+                             "error message", empty_metadata_);
   dispatcher_helper_.runDispatcher();
 }
 
@@ -319,7 +340,7 @@ TEST_P(GrpcClientIntegrationTest, CancelRequest) {
   initialize();
   auto request = createRequest(empty_metadata_);
   EXPECT_CALL(*request->child_span_,
-              setTag(Tracing::Tags::get().STATUS, Tracing::Tags::get().CANCELED));
+              setTag(Tracing::Tags::get().Status, Tracing::Tags::get().Canceled));
   EXPECT_CALL(*request->child_span_, finishSpan());
   request->grpc_request_->cancel();
   dispatcher_helper_.dispatcher_.run(Event::Dispatcher::RunType::NonBlock);
@@ -327,8 +348,9 @@ TEST_P(GrpcClientIntegrationTest, CancelRequest) {
 }
 
 // Parameterize the loopback test server socket address and gRPC client type.
-INSTANTIATE_TEST_CASE_P(SslIpVersionsClientType, GrpcSslClientIntegrationTest,
-                        GRPC_CLIENT_INTEGRATION_PARAMS);
+INSTANTIATE_TEST_SUITE_P(SslIpVersionsClientType, GrpcSslClientIntegrationTest,
+                         GRPC_CLIENT_INTEGRATION_PARAMS,
+                         GrpcClientIntegrationParamTest::protocolTestParamsToString);
 
 // Validate that a simple request-reply unary RPC works with SSL.
 TEST_P(GrpcSslClientIntegrationTest, BasicSslRequest) {
@@ -389,8 +411,9 @@ public:
 };
 
 // Parameterize the loopback test server socket address and gRPC client type.
-INSTANTIATE_TEST_CASE_P(SslIpVersionsClientType, GrpcAccessTokenClientIntegrationTest,
-                        GRPC_CLIENT_INTEGRATION_PARAMS);
+INSTANTIATE_TEST_SUITE_P(SslIpVersionsClientType, GrpcAccessTokenClientIntegrationTest,
+                         GRPC_CLIENT_INTEGRATION_PARAMS,
+                         GrpcClientIntegrationParamTest::protocolTestParamsToString);
 
 // Validate that a simple request-reply unary RPC works with AccessToken auth.
 TEST_P(GrpcAccessTokenClientIntegrationTest, AccessTokenAuthRequest) {

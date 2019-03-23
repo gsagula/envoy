@@ -118,7 +118,7 @@ int StreamHandleWrapper::luaRespond(lua_State* state) {
 
   uint64_t status;
   if (headers->Status() == nullptr ||
-      !StringUtil::atoul(headers->Status()->value().c_str(), status) || status < 200 ||
+      !StringUtil::atoull(headers->Status()->value().c_str(), status) || status < 200 ||
       status >= 600) {
     luaL_error(state, ":status must be between 200-599");
   }
@@ -191,7 +191,7 @@ int StreamHandleWrapper::luaHttpCall(lua_State* state) {
   }
 
   http_request_ = filter_.clusterManager().httpAsyncClientForCluster(cluster).send(
-      std::move(message), *this, timeout);
+      std::move(message), *this, Http::AsyncClient::RequestOptions().setTimeout(timeout));
   if (http_request_) {
     state_ = State::HttpCall;
     return lua_yield(state, 0);

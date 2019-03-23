@@ -24,14 +24,15 @@ namespace Envoy {
 namespace Extensions {
 namespace TransportSockets {
 namespace Alts {
+namespace {
 
-class AltsIntegrationTestBase : public HttpIntegrationTest,
-                                public testing::TestWithParam<Network::Address::IpVersion> {
+class AltsIntegrationTestBase : public testing::TestWithParam<Network::Address::IpVersion>,
+                                public HttpIntegrationTest {
 public:
   AltsIntegrationTestBase(const std::string& server_peer_identity,
                           const std::string& client_peer_identity, bool server_connect_handshaker,
                           bool client_connect_handshaker)
-      : HttpIntegrationTest(Http::CodecClient::Type::HTTP1, GetParam(), realTime()),
+      : HttpIntegrationTest(Http::CodecClient::Type::HTTP1, GetParam()),
         server_peer_identity_(server_peer_identity), client_peer_identity_(client_peer_identity),
         server_connect_handshaker_(server_connect_handshaker),
         client_connect_handshaker_(client_connect_handshaker) {}
@@ -55,7 +56,7 @@ public:
   }
 
   void SetUp() override {
-    fake_handshaker_server_thread_ = std::make_unique<Thread::Thread>([this]() {
+    fake_handshaker_server_thread_ = api_->threadFactory().createThread([this]() {
       std::unique_ptr<grpc::Service> service = grpc::gcp::CreateFakeHandshakerService();
 
       std::string server_address = Network::Test::getLoopbackAddressUrlString(version_) + ":0";
@@ -98,7 +99,8 @@ public:
   Network::ClientConnectionPtr makeAltsConnection() {
     Network::Address::InstanceConstSharedPtr address = getAddress(version_, lookupPort("http"));
     return dispatcher_->createClientConnection(address, Network::Address::InstanceConstSharedPtr(),
-                                               client_alts_->createTransportSocket(), nullptr);
+                                               client_alts_->createTransportSocket(nullptr),
+                                               nullptr);
   }
 
   std::string fakeHandshakerServerAddress(bool connect_to_handshaker) {
@@ -139,9 +141,9 @@ public:
                                 /* client_connect_handshaker */ true) {}
 };
 
-INSTANTIATE_TEST_CASE_P(IpVersions, AltsIntegrationTestValidPeer,
-                        testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
-                        TestUtility::ipTestParamsToString);
+INSTANTIATE_TEST_SUITE_P(IpVersions, AltsIntegrationTestValidPeer,
+                         testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
+                         TestUtility::ipTestParamsToString);
 
 // Verifies that when received peer service account passes validation, the alts
 // handshake succeeds.
@@ -160,9 +162,9 @@ public:
                                 /* client_connect_handshaker */ true) {}
 };
 
-INSTANTIATE_TEST_CASE_P(IpVersions, AltsIntegrationTestEmptyPeer,
-                        testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
-                        TestUtility::ipTestParamsToString);
+INSTANTIATE_TEST_SUITE_P(IpVersions, AltsIntegrationTestEmptyPeer,
+                         testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
+                         TestUtility::ipTestParamsToString);
 
 // Verifies that when peer service account is not set into config, the alts
 // handshake succeeds.
@@ -181,9 +183,9 @@ public:
                                 /* client_connect_handshaker */ true) {}
 };
 
-INSTANTIATE_TEST_CASE_P(IpVersions, AltsIntegrationTestClientInvalidPeer,
-                        testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
-                        TestUtility::ipTestParamsToString);
+INSTANTIATE_TEST_SUITE_P(IpVersions, AltsIntegrationTestClientInvalidPeer,
+                         testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
+                         TestUtility::ipTestParamsToString);
 
 // Verifies that when client receives peer service account which does not match
 // any account in config, the handshake will fail and client closes connection.
@@ -201,9 +203,9 @@ public:
                                 /* client_connect_handshaker */ true) {}
 };
 
-INSTANTIATE_TEST_CASE_P(IpVersions, AltsIntegrationTestServerInvalidPeer,
-                        testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
-                        TestUtility::ipTestParamsToString);
+INSTANTIATE_TEST_SUITE_P(IpVersions, AltsIntegrationTestServerInvalidPeer,
+                         testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
+                         TestUtility::ipTestParamsToString);
 
 // Verifies that when Envoy receives peer service account which does not match
 // any account in config, the handshake will fail and Envoy closes connection.
@@ -229,11 +231,11 @@ public:
                                 /* client_connect_handshaker */ false) {}
 };
 
-INSTANTIATE_TEST_CASE_P(IpVersions, AltsIntegrationTestClientWrongHandshaker,
-                        testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
-                        TestUtility::ipTestParamsToString);
+INSTANTIATE_TEST_SUITE_P(IpVersions, AltsIntegrationTestClientWrongHandshaker,
+                         testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
+                         TestUtility::ipTestParamsToString);
 
-// Verifies that when client connects to a wrong handshakerserver, handshake fails
+// Verifies that when client connects to the wrong handshaker server, handshake fails
 // and connection closes.
 TEST_P(AltsIntegrationTestClientWrongHandshaker, ConnectToWrongHandshakerAddress) {
   initialize();
@@ -241,6 +243,7 @@ TEST_P(AltsIntegrationTestClientWrongHandshaker, ConnectToWrongHandshakerAddress
   EXPECT_FALSE(codec_client_->connected());
 }
 
+} // namespace
 } // namespace Alts
 } // namespace TransportSockets
 } // namespace Extensions

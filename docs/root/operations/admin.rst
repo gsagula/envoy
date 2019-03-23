@@ -25,6 +25,7 @@ modify different aspects of the server:
 
     admin:
       access_log_path: /tmp/admin_access.log
+      profile_path: /tmp/envoy.prof
       address:
         socket_address: { address: 127.0.0.1, port_value: 9901 }
 
@@ -60,15 +61,15 @@ modify different aspects of the server:
   Cluster manager information
     - ``version_info`` string -- the version info string of the last loaded
       :ref:`CDS<config_cluster_manager_cds>` update.
-      If envoy does not have :ref:`CDS<config_cluster_manager_cds>` setup, the
+      If Envoy does not have :ref:`CDS<config_cluster_manager_cds>` setup, the
       output will read ``version_info::static``.
 
   Cluster wide information
     - :ref:`circuit breakers<config_cluster_manager_cluster_circuit_breakers>` settings for all priority settings.
 
     - Information about :ref:`outlier detection<arch_overview_outlier_detection>` if a detector is installed. Currently
-      :ref:`success rate average<arch_overview_outlier_detection_ejection_event_logging_cluster_success_rate_average>`,
-      and :ref:`ejection threshold<arch_overview_outlier_detection_ejection_event_logging_cluster_success_rate_ejection_threshold>`
+      :ref:`average success rate <envoy_api_field_data.cluster.v2alpha.OutlierEjectSuccessRate.cluster_average_success_rate>`,
+      and :ref:`ejection threshold<envoy_api_field_data.cluster.v2alpha.OutlierEjectSuccessRate.cluster_success_rate_ejection_threshold>`
       are presented. Both of these values could be ``-1`` if there was not enough data to calculate them in the last
       :ref:`interval<envoy_api_field_cluster.OutlierDetection.interval>`.
 
@@ -128,9 +129,18 @@ modify different aspects of the server:
   The underlying proto is marked v2alpha and hence its contents, including the JSON representation,
   are not guaranteed to be stable.
 
+.. http:get:: /contention
+
+  Dump current Envoy mutex contention stats (:ref:`MutexStats <envoy_api_msg_admin.v2alpha.MutexStats>`) in JSON
+  format, if mutex tracing is enabled. See :option:`--enable-mutex-tracing`.
+
 .. http:post:: /cpuprofiler
 
-  Enable or disable the CPU profiler. Requires compiling with gperftools.
+  Enable or disable the CPU profiler. Requires compiling with gperftools. The output file can be configured by admin.profile_path.
+
+.. http:post:: /heapprofiler
+
+  Enable or disable the Heap profiler. Requires compiling with gperftools. The output file can be configured by admin.profile_path.
 
 .. _operations_admin_interface_healthcheck_fail:
 
@@ -175,17 +185,45 @@ modify different aspects of the server:
 
 .. http:get:: /server_info
 
-  Outputs a JSON message containing information about the running server. Sample output looks like:
+  Outputs a JSON message containing information about the running server.
 
-.. code-block:: none
+  Sample output looks like:
 
-  {
-   "version": "b050513e840aa939a01f89b07c162f00ab3150eb/1.9.0-dev/Modified/DEBUG",
-   "state": "LIVE",
-   "epoch": 0,
-   "uptime_current_epoch": "6s",
-   "uptime_all_epochs": "6s"
-  }
+  .. code-block:: json
+
+    {
+      "version": "b050513e840aa939a01f89b07c162f00ab3150eb/1.9.0-dev/Modified/DEBUG",
+      "state": "LIVE",
+      "command_line_options": {
+        "base_id": "0",
+        "concurrency": 8,
+        "config_path": "config.yaml",
+        "config_yaml": "",
+        "allow_unknown_fields": false,
+        "admin_address_path": "",
+        "local_address_ip_version": "v4",
+        "log_level": "info",
+        "component_log_level": "",
+        "log_format": "[%Y-%m-%d %T.%e][%t][%l][%n] %v",
+        "log_path": "",
+        "hot_restart_version": false,
+        "service_cluster": "",
+        "service_node": "",
+        "service_zone": "",
+        "mode": "Serve",
+        "max_stats": "16384",
+        "max_obj_name_len": "60",
+        "disable_hot_restart": false,
+        "enable_mutex_tracing": false,
+        "restart_epoch": 0,
+        "file_flush_interval": "10s",
+        "drain_time": "600s",
+        "parent_shutdown_time": "900s",
+        "cpuset_threads": false
+      },
+      "uptime_current_epoch": "6s",
+      "uptime_all_epochs": "6s"
+    }
 
 See the :ref:`ServerInfo proto <envoy_api_msg_admin.v2alpha.ServerInfo>` for an
 explanation of the output.
@@ -198,7 +236,7 @@ explanation of the output.
   Histograms will output the computed quantiles i.e P0,P25,P50,P75,P90,P99,P99.9 and P100.
   The output for each quantile will be in the form of (interval,cumulative) where interval value
   represents the summary since last flush interval and cumulative value represents the
-  summary since the start of envoy instance. "No recorded values" in the histogram output indicates
+  summary since the start of Envoy instance. "No recorded values" in the histogram output indicates
   that it has not been updated with a value.
   See :ref:`here <operations_stats>` for more information.
 
@@ -278,8 +316,11 @@ explanation of the output.
   .. http:get:: /stats/prometheus
 
   Outputs /stats in `Prometheus <https://prometheus.io/docs/instrumenting/exposition_formats/>`_
-  v0.0.4 format. This can be used to integrate with a Prometheus server. Currently, only counters and
-  gauges are output. Histograms will be output in a future update.
+  v0.0.4 format. This can be used to integrate with a Prometheus server.
+
+  You can optionally pass the `usedonly` URL query argument to only get statistics that
+  Envoy has updated (counters incremented at least once, gauges changed at least once,
+  and histograms added to at least once)
 
 .. _operations_admin_interface_runtime:
 
@@ -339,7 +380,7 @@ explanation of the output.
 
   This endpoint is intended to be used as the stream source for
   `Hystrix dashboard <https://github.com/Netflix-Skunkworks/hystrix-dashboard/wiki>`_.
-  a GET to this endpoint will trriger a stream of statistics from envoy in
+  a GET to this endpoint will trigger a stream of statistics from Envoy in
   `text/event-stream <https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events>`_
   format, as expected by the Hystrix dashboard.
 
@@ -367,3 +408,11 @@ explanation of the output.
     set to '0'.
   * Latency information represents data since last flush.
     Mean latency is currently not available.
+
+.. http:post:: /tap
+
+  This endpoint is used for configuring an active tap session. It is only
+  available if a valid tap extension has been configured, and that extension has
+  been configured to accept admin configuration. See:
+
+  * :ref:`HTTP tap filter configuration <config_http_filters_tap_admin_handler>`

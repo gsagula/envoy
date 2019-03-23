@@ -12,6 +12,7 @@
 #include "common/common/non_copyable.h"
 
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "fmt/ostream.h"
 #include "spdlog/spdlog.h"
 
@@ -26,6 +27,7 @@ namespace Logger {
   FUNCTION(client)               \
   FUNCTION(config)               \
   FUNCTION(connection)           \
+  FUNCTION(dubbo)                \
   FUNCTION(file)                 \
   FUNCTION(filter)               \
   FUNCTION(grpc)                 \
@@ -34,10 +36,12 @@ namespace Logger {
   FUNCTION(http)                 \
   FUNCTION(http2)                \
   FUNCTION(hystrix)              \
+  FUNCTION(init)                 \
   FUNCTION(lua)                  \
   FUNCTION(main)                 \
   FUNCTION(misc)                 \
   FUNCTION(mongo)                \
+  FUNCTION(quic)                 \
   FUNCTION(pool)                 \
   FUNCTION(rbac)                 \
   FUNCTION(redis)                \
@@ -45,6 +49,7 @@ namespace Logger {
   FUNCTION(runtime)              \
   FUNCTION(stats)                \
   FUNCTION(secret)               \
+  FUNCTION(tap)                  \
   FUNCTION(testing)              \
   FUNCTION(thrift)               \
   FUNCTION(tracing)              \
@@ -75,7 +80,9 @@ public:
     off = spdlog::level::off
   } levels;
 
-  std::string levelString() const { return spdlog::level::level_names[logger_->level()]; }
+  spdlog::string_view_t levelString() const {
+    return spdlog::level::level_string_views[logger_->level()];
+  }
   std::string name() const { return logger_->name(); }
   void setLevel(spdlog::level::level_enum level) { logger_->set_level(level); }
   spdlog::level::level_enum level() const { return logger_->level(); }
@@ -149,9 +156,7 @@ public:
   void set_pattern(const std::string& pattern) override {
     set_formatter(spdlog::details::make_unique<spdlog::pattern_formatter>(pattern));
   }
-  void set_formatter(std::unique_ptr<spdlog::formatter> formatter) override {
-    formatter_ = std::move(formatter);
-  }
+  void set_formatter(std::unique_ptr<spdlog::formatter> formatter) override;
 
   /**
    * @return bool whether a lock has been established.
@@ -176,12 +181,13 @@ private:
 
   SinkDelegate* sink_{nullptr};
   std::unique_ptr<StderrSinkDelegate> stderr_sink_; // Builtin sink to use as a last resort.
-  std::unique_ptr<spdlog::formatter> formatter_;
+  std::unique_ptr<spdlog::formatter> formatter_ GUARDED_BY(format_mutex_);
+  absl::Mutex format_mutex_; // direct absl reference to break build cycle.
 };
 
 /**
  * Defines a scope for the logging system with the specified lock and log level.
- * This is equivalalent to setLogLevel, setLogFormat, and setLock, which can be
+ * This is equivalent to setLogLevel, setLogFormat, and setLock, which can be
  * called individually as well, e.g. to set the log level without changing the
  * lock or format.
  *

@@ -14,7 +14,6 @@
 #include "common/common/logger.h"
 #include "common/event/libevent.h"
 #include "common/network/filter_manager_impl.h"
-#include "common/ssl/ssl_socket.h"
 #include "common/stream_info/stream_info_impl.h"
 
 #include "absl/types/optional.h"
@@ -82,7 +81,7 @@ public:
     return socket_->localAddress();
   }
   void setConnectionStats(const ConnectionStats& stats) override;
-  const Ssl::Connection* ssl() const override { return transport_socket_->ssl(); }
+  const Ssl::ConnectionInfo* ssl() const override { return transport_socket_->ssl(); }
   State state() const override;
   void write(Buffer::Instance& data, bool end_stream) override;
   void setBufferLimits(uint32_t limit) override;
@@ -95,6 +94,7 @@ public:
   absl::string_view requestedServerName() const override { return socket_->requestedServerName(); }
   StreamInfo::StreamInfo& streamInfo() override { return stream_info_; }
   const StreamInfo::StreamInfo& streamInfo() const override { return stream_info_; }
+  absl::string_view transportFailureReason() const override;
 
   // Network::BufferSource
   BufferSource::StreamBuffer getReadBuffer() override { return {read_buffer_, read_end_stream_}; }
@@ -103,7 +103,8 @@ public:
   }
 
   // Network::TransportSocketCallbacks
-  int fd() const override { return socket_->fd(); }
+  IoHandle& ioHandle() override { return socket_->ioHandle(); }
+  const IoHandle& ioHandle() const override { return socket_->ioHandle(); }
   Connection& connection() override { return *this; }
   void raiseEvent(ConnectionEvent event) override;
   // Should the read buffer be drained?
@@ -132,8 +133,8 @@ protected:
   void onHighWatermark();
 
   TransportSocketPtr transport_socket_;
-  FilterManagerImpl filter_manager_;
   ConnectionSocketPtr socket_;
+  FilterManagerImpl filter_manager_;
   StreamInfo::StreamInfoImpl stream_info_;
 
   Buffer::OwnedImpl read_buffer_;

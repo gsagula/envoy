@@ -62,6 +62,7 @@ namespace Http {
   HISTOGRAM(downstream_rq_time)                                                                    \
   COUNTER  (downstream_rq_idle_timeout)                                                            \
   COUNTER  (downstream_rq_overload_close)                                                          \
+  COUNTER  (downstream_rq_timeout)                                                            \
   COUNTER  (rs_too_large)
 // clang-format on
 
@@ -108,6 +109,7 @@ struct TracingConnectionManagerConfig {
   uint64_t client_sampling_;
   uint64_t random_sampling_;
   uint64_t overall_sampling_;
+  bool verbose_;
 };
 
 typedef std::unique_ptr<TracingConnectionManagerConfig> TracingConnectionManagerConfigPtr;
@@ -211,12 +213,6 @@ public:
   virtual FilterChainFactory& filterFactory() PURE;
 
   /**
-   * @return whether the connection manager will reverse the order of encoder
-   * filters in the HTTP filter chain.
-   */
-  virtual bool reverseEncodeOrder() PURE;
-
-  /**
    * @return whether the connection manager will generate a fresh x-request-id if the request does
    *         not have one.
    */
@@ -228,10 +224,21 @@ public:
   virtual absl::optional<std::chrono::milliseconds> idleTimeout() const PURE;
 
   /**
+   * @return maximum request headers size the connection manager will accept.
+   */
+  virtual uint32_t maxRequestHeadersKb() const PURE;
+
+  /**
    * @return per-stream idle timeout for incoming connection manager connections. Zero indicates a
    *         disabled idle timeout.
    */
   virtual std::chrono::milliseconds streamIdleTimeout() const PURE;
+
+  /**
+   * @return request timeout for incoming connection manager connections. Zero indicates
+   *         a disabled request timeout.
+   */
+  virtual std::chrono::milliseconds requestTimeout() const PURE;
 
   /**
    * @return delayed close timeout for downstream HTTP connections. Zero indicates a disabled

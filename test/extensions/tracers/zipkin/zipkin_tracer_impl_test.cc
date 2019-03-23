@@ -1,6 +1,8 @@
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 #include "common/http/header_map_impl.h"
 #include "common/http/headers.h"
@@ -29,14 +31,14 @@ using testing::Invoke;
 using testing::NiceMock;
 using testing::Return;
 using testing::ReturnRef;
-using testing::Test;
 
 namespace Envoy {
 namespace Extensions {
 namespace Tracers {
 namespace Zipkin {
+namespace {
 
-class ZipkinDriverTest : public Test {
+class ZipkinDriverTest : public testing::Test {
 public:
   ZipkinDriverTest() : time_source_(test_time_.timeSystem()) {}
 
@@ -67,7 +69,7 @@ public:
   }
 
   // TODO(#4160): Currently time_system_ is initialized from DangerousDeprecatedTestTime, which uses
-  // real time, not mock-time. When that is switched to use mock-time intead, I think
+  // real time, not mock-time. When that is switched to use mock-time instead, I think
   // generateRandom64() may not be as random as we want, and we'll need to inject entropy
   // appropriate for the test.
   uint64_t generateRandom64() { return Util::generateRandom64(time_source_); }
@@ -136,10 +138,11 @@ TEST_F(ZipkinDriverTest, FlushSeveralSpans) {
   Http::AsyncClient::Callbacks* callback;
   const absl::optional<std::chrono::milliseconds> timeout(std::chrono::seconds(5));
 
-  EXPECT_CALL(cm_.async_client_, send_(_, _, timeout))
-      .WillOnce(Invoke(
-          [&](Http::MessagePtr& message, Http::AsyncClient::Callbacks& callbacks,
-              const absl::optional<std::chrono::milliseconds>&) -> Http::AsyncClient::Request* {
+  EXPECT_CALL(cm_.async_client_,
+              send_(_, _, Http::AsyncClient::RequestOptions().setTimeout(timeout)))
+      .WillOnce(
+          Invoke([&](Http::MessagePtr& message, Http::AsyncClient::Callbacks& callbacks,
+                     const Http::AsyncClient::RequestOptions&) -> Http::AsyncClient::Request* {
             callback = &callbacks;
 
             EXPECT_STREQ("/api/v1/spans", message->headers().Path()->value().c_str());
@@ -185,10 +188,11 @@ TEST_F(ZipkinDriverTest, FlushOneSpanReportFailure) {
   Http::AsyncClient::Callbacks* callback;
   const absl::optional<std::chrono::milliseconds> timeout(std::chrono::seconds(5));
 
-  EXPECT_CALL(cm_.async_client_, send_(_, _, timeout))
-      .WillOnce(Invoke(
-          [&](Http::MessagePtr& message, Http::AsyncClient::Callbacks& callbacks,
-              const absl::optional<std::chrono::milliseconds>&) -> Http::AsyncClient::Request* {
+  EXPECT_CALL(cm_.async_client_,
+              send_(_, _, Http::AsyncClient::RequestOptions().setTimeout(timeout)))
+      .WillOnce(
+          Invoke([&](Http::MessagePtr& message, Http::AsyncClient::Callbacks& callbacks,
+                     const Http::AsyncClient::RequestOptions&) -> Http::AsyncClient::Request* {
             callback = &callbacks;
 
             EXPECT_STREQ("/api/v1/spans", message->headers().Path()->value().c_str());
@@ -222,7 +226,8 @@ TEST_F(ZipkinDriverTest, FlushSpansTimer) {
   setupValidDriver();
 
   const absl::optional<std::chrono::milliseconds> timeout(std::chrono::seconds(5));
-  EXPECT_CALL(cm_.async_client_, send_(_, _, timeout));
+  EXPECT_CALL(cm_.async_client_,
+              send_(_, _, Http::AsyncClient::RequestOptions().setTimeout(timeout)));
 
   EXPECT_CALL(runtime_.snapshot_, getInteger("tracing.zipkin.min_flush_spans", 5))
       .WillOnce(Return(5));
@@ -447,6 +452,24 @@ TEST_F(ZipkinDriverTest, ZipkinSpanTest) {
   EXPECT_EQ(1ULL, zipkin_zipkin_span3.binaryAnnotations().size());
   EXPECT_EQ("key3", zipkin_zipkin_span3.binaryAnnotations()[0].key());
   EXPECT_EQ("value3", zipkin_zipkin_span3.binaryAnnotations()[0].value());
+
+  // ====
+  // Test effective log()
+  // ====
+
+  Tracing::SpanPtr span4 = driver_->startSpan(config_, request_headers_, operation_name_,
+                                              start_time_, {Tracing::Reason::Sampling, true});
+  const auto timestamp =
+      SystemTime{std::chrono::duration_cast<SystemTime::duration>(std::chrono::hours{123})};
+  const auto timestamp_count =
+      std::chrono::duration_cast<std::chrono::microseconds>(timestamp.time_since_epoch()).count();
+  span4->log(timestamp, "abc");
+
+  ZipkinSpanPtr zipkin_span4(dynamic_cast<ZipkinSpan*>(span4.release()));
+  Span& zipkin_zipkin_span4 = zipkin_span4->span();
+  EXPECT_FALSE(zipkin_zipkin_span4.annotations().empty());
+  EXPECT_EQ(timestamp_count, zipkin_zipkin_span4.annotations().back().timestamp());
+  EXPECT_EQ("abc", zipkin_zipkin_span4.annotations().back().value());
 }
 
 TEST_F(ZipkinDriverTest, ZipkinSpanContextFromB3HeadersTest) {
@@ -470,6 +493,27 @@ TEST_F(ZipkinDriverTest, ZipkinSpanContextFromB3HeadersTest) {
   EXPECT_EQ(trace_id, zipkin_span->span().traceIdAsHexString());
   EXPECT_EQ(span_id, zipkin_span->span().idAsHexString());
   EXPECT_EQ(parent_id, zipkin_span->span().parentIdAsHexString());
+  EXPECT_TRUE(zipkin_span->span().sampled());
+}
+
+TEST_F(ZipkinDriverTest, ZipkinSpanContextFromB3HeadersEmptyParentSpanTest) {
+  setupValidDriver();
+
+  // Root span so have same trace and span id
+  const std::string id = Hex::uint64ToHex(generateRandom64());
+  request_headers_.addReferenceKey(ZipkinCoreConstants::get().X_B3_TRACE_ID, id);
+  request_headers_.addReferenceKey(ZipkinCoreConstants::get().X_B3_SPAN_ID, id);
+  request_headers_.addReferenceKey(ZipkinCoreConstants::get().X_B3_SAMPLED,
+                                   ZipkinCoreConstants::get().SAMPLED);
+
+  // Set parent span id to empty string, to ensure it is ignored
+  const std::string parent_span_id = "";
+  request_headers_.addReferenceKey(ZipkinCoreConstants::get().X_B3_PARENT_SPAN_ID, parent_span_id);
+
+  Tracing::SpanPtr span = driver_->startSpan(config_, request_headers_, operation_name_,
+                                             start_time_, {Tracing::Reason::Sampling, true});
+
+  ZipkinSpanPtr zipkin_span(dynamic_cast<ZipkinSpan*>(span.release()));
   EXPECT_TRUE(zipkin_span->span().sampled());
 }
 
@@ -577,6 +621,39 @@ TEST_F(ZipkinDriverTest, ExplicitlySetSampledTrue) {
   // Check B3 sampled flag is set to sample
   EXPECT_EQ(ZipkinCoreConstants::get().SAMPLED, sampled_entry->value().getStringView());
 }
+
+TEST_F(ZipkinDriverTest, DuplicatedHeader) {
+  setupValidDriver();
+  request_headers_.addReferenceKey(ZipkinCoreConstants::get().X_B3_TRACE_ID,
+                                   Hex::uint64ToHex(generateRandom64()));
+  request_headers_.addReferenceKey(ZipkinCoreConstants::get().X_B3_SPAN_ID,
+                                   Hex::uint64ToHex(generateRandom64()));
+  request_headers_.addReferenceKey(ZipkinCoreConstants::get().X_B3_PARENT_SPAN_ID,
+                                   Hex::uint64ToHex(generateRandom64()));
+  Tracing::SpanPtr span = driver_->startSpan(config_, request_headers_, operation_name_,
+                                             start_time_, {Tracing::Reason::Sampling, false});
+
+  typedef std::function<bool(const std::string& key)> DupCallback;
+  DupCallback dup_callback = [](const std::string& key) -> bool {
+    static std::unordered_map<std::string, bool> dup;
+    if (dup.find(key) == dup.end()) {
+      dup[key] = true;
+      return false;
+    }
+    return true;
+  };
+
+  span->setSampled(true);
+  span->injectContext(request_headers_);
+  request_headers_.iterate(
+      [](const Http::HeaderEntry& header, void* cb) -> Http::HeaderMap::Iterate {
+        EXPECT_FALSE(static_cast<DupCallback*>(cb)->operator()(header.key().c_str()));
+        return Http::HeaderMap::Iterate::Continue;
+      },
+      &dup_callback);
+}
+
+} // namespace
 } // namespace Zipkin
 } // namespace Tracers
 } // namespace Extensions

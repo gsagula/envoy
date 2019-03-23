@@ -76,7 +76,7 @@ public:
                       Upstream::ClusterInfoConstSharedPtr cluster,
                       NiceMock<Event::MockTimer>* upstream_ready_timer)
       : ConnPoolImpl(dispatcher, Upstream::makeTestHost(cluster, "tcp://127.0.0.1:9000"),
-                     Upstream::ResourcePriority::Default, nullptr),
+                     Upstream::ResourcePriority::Default, nullptr, nullptr),
         mock_dispatcher_(dispatcher), mock_upstream_ready_timer_(upstream_ready_timer) {}
 
   ~ConnPoolImplForTest() {
@@ -159,10 +159,7 @@ public:
         conn_pool_(dispatcher_, cluster_, upstream_ready_timer_) {}
 
   ~TcpConnPoolImplTest() {
-    // Make sure all gauges are 0.
-    for (const Stats::GaugeSharedPtr& gauge : cluster_->stats_store_.gauges()) {
-      EXPECT_EQ(0U, gauge->value());
-    }
+    EXPECT_TRUE(TestUtility::gaugesZeroed(cluster_->stats_store_.gauges()));
   }
 
   NiceMock<Event::MockDispatcher> dispatcher_;
@@ -181,7 +178,7 @@ public:
       : upstream_ready_timer_(new NiceMock<Event::MockTimer>(&dispatcher_)),
         conn_pool_{new ConnPoolImpl(dispatcher_,
                                     Upstream::makeTestHost(cluster_, "tcp://127.0.0.1:9000"),
-                                    Upstream::ResourcePriority::Default, nullptr)} {}
+                                    Upstream::ResourcePriority::Default, nullptr, nullptr)} {}
 
   ~TcpConnPoolImplDestructorTest() {}
 

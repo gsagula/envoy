@@ -6,16 +6,18 @@
 
 #include "envoy/access_log/access_log.h"
 #include "envoy/api/api.h"
+#include "envoy/common/mutex_tracer.h"
 #include "envoy/event/timer.h"
+#include "envoy/http/context.h"
 #include "envoy/init/init.h"
 #include "envoy/local_info/local_info.h"
 #include "envoy/network/listen_socket.h"
-#include "envoy/ratelimit/ratelimit.h"
 #include "envoy/runtime/runtime.h"
 #include "envoy/secret/secret_manager.h"
 #include "envoy/server/admin.h"
 #include "envoy/server/drain_manager.h"
 #include "envoy/server/hot_restart.h"
+#include "envoy/server/lifecycle_notifier.h"
 #include "envoy/server/listener_manager.h"
 #include "envoy/server/options.h"
 #include "envoy/server/overload_manager.h"
@@ -117,6 +119,11 @@ public:
   virtual ListenerManager& listenerManager() PURE;
 
   /**
+   * @return the server's global mutex tracer, if it was instantiated. Nullptr otherwise.
+   */
+  virtual Envoy::MutexTracer* mutexTracer() PURE;
+
+  /**
    * @return the server's overload manager.
    */
   virtual OverloadManager& overloadManager() PURE;
@@ -129,7 +136,7 @@ public:
   /**
    * @return the server's CLI options.
    */
-  virtual Options& options() PURE;
+  virtual const Options& options() PURE;
 
   /**
    * @return RandomGenerator& the random generator for the server.
@@ -137,15 +144,14 @@ public:
   virtual Runtime::RandomGenerator& random() PURE;
 
   /**
-   * @return a new ratelimit client. The implementation depends on the configuration of the server.
-   */
-  virtual RateLimit::ClientPtr
-  rateLimitClient(const absl::optional<std::chrono::milliseconds>& timeout) PURE;
-
-  /**
    * @return Runtime::Loader& the singleton runtime loader for the server.
    */
   virtual Runtime::Loader& runtime() PURE;
+
+  /**
+   * @return ServerLifecycleNotifier& the singleton lifecycle notifier for the server.
+   */
+  virtual ServerLifecycleNotifier& lifecycleNotifier() PURE;
 
   /**
    * Shutdown the server gracefully.
@@ -183,9 +189,9 @@ public:
   virtual Stats::Store& stats() PURE;
 
   /**
-   * @return the server-wide http tracer.
+   * @return the server-wide http context.
    */
-  virtual Tracing::HttpTracer& httpTracer() PURE;
+  virtual Http::Context& httpContext() PURE;
 
   /**
    * @return ThreadLocal::Instance& the thread local storage engine for the server. This is used to
@@ -199,9 +205,9 @@ public:
   virtual const LocalInfo::LocalInfo& localInfo() PURE;
 
   /**
-   * @return the time system used for the server.
+   * @return the time source used for the server.
    */
-  virtual Event::TimeSystem& timeSystem() PURE;
+  virtual TimeSource& timeSource() PURE;
 
   /**
    * @return the flush interval of stats sinks.

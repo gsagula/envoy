@@ -8,6 +8,7 @@
 #include "common/http/header_map_impl.h"
 
 #include "test/mocks/http/mocks.h"
+#include "test/mocks/ssl/mocks.h"
 #include "test/mocks/stream_info/mocks.h"
 #include "test/mocks/upstream/mocks.h"
 #include "test/test_common/printers.h"
@@ -17,12 +18,14 @@
 #include "gtest/gtest.h"
 
 using testing::_;
+using testing::Const;
 using testing::NiceMock;
 using testing::Return;
 using testing::ReturnRef;
 
 namespace Envoy {
 namespace AccessLog {
+namespace {
 
 TEST(AccessLogFormatUtilsTest, protocolToString) {
   EXPECT_EQ("HTTP/1.0", AccessLogFormatUtils::protocolToString(Http::Protocol::Http10));
@@ -199,6 +202,117 @@ TEST(AccessLogFormatterTest, streamInfoFormatter) {
     std::string requested_server_name;
     EXPECT_CALL(stream_info, requestedServerName())
         .WillRepeatedly(ReturnRef(requested_server_name));
+    EXPECT_EQ("-", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    StreamInfoFormatter upstream_format("DOWNSTREAM_PEER_URI_SAN");
+    NiceMock<Ssl::MockConnectionInfo> connection_info;
+    const std::vector<std::string> sans{"san"};
+    ON_CALL(connection_info, uriSanPeerCertificate()).WillByDefault(Return(sans));
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(&connection_info));
+    EXPECT_EQ("san", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    StreamInfoFormatter upstream_format("DOWNSTREAM_PEER_URI_SAN");
+    NiceMock<Ssl::MockConnectionInfo> connection_info;
+    const std::vector<std::string> sans{"san1", "san2"};
+    ON_CALL(connection_info, uriSanPeerCertificate()).WillByDefault(Return(sans));
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(&connection_info));
+    EXPECT_EQ("san1,san2", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    StreamInfoFormatter upstream_format("DOWNSTREAM_PEER_URI_SAN");
+    NiceMock<Ssl::MockConnectionInfo> connection_info;
+    ON_CALL(connection_info, uriSanPeerCertificate())
+        .WillByDefault(Return(std::vector<std::string>()));
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(&connection_info));
+    EXPECT_EQ("-", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(nullptr));
+    StreamInfoFormatter upstream_format("DOWNSTREAM_PEER_URI_SAN");
+    EXPECT_EQ("-", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    StreamInfoFormatter upstream_format("DOWNSTREAM_LOCAL_URI_SAN");
+    NiceMock<Ssl::MockConnectionInfo> connection_info;
+    const std::vector<std::string> sans{"san"};
+    ON_CALL(connection_info, uriSanLocalCertificate()).WillByDefault(Return(sans));
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(&connection_info));
+    EXPECT_EQ("san", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    StreamInfoFormatter upstream_format("DOWNSTREAM_LOCAL_URI_SAN");
+    NiceMock<Ssl::MockConnectionInfo> connection_info;
+    const std::vector<std::string> sans{"san1", "san2"};
+    ON_CALL(connection_info, uriSanLocalCertificate()).WillByDefault(Return(sans));
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(&connection_info));
+    EXPECT_EQ("san1,san2", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    StreamInfoFormatter upstream_format("DOWNSTREAM_LOCAL_URI_SAN");
+    NiceMock<Ssl::MockConnectionInfo> connection_info;
+    ON_CALL(connection_info, uriSanLocalCertificate())
+        .WillByDefault(Return(std::vector<std::string>()));
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(&connection_info));
+    EXPECT_EQ("-", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(nullptr));
+    StreamInfoFormatter upstream_format("DOWNSTREAM_LOCAL_URI_SAN");
+    EXPECT_EQ("-", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    StreamInfoFormatter upstream_format("DOWNSTREAM_LOCAL_SUBJECT");
+    NiceMock<Ssl::MockConnectionInfo> connection_info;
+    ON_CALL(connection_info, subjectLocalCertificate()).WillByDefault(Return("subject"));
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(&connection_info));
+    EXPECT_EQ("subject", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    StreamInfoFormatter upstream_format("DOWNSTREAM_LOCAL_SUBJECT");
+    NiceMock<Ssl::MockConnectionInfo> connection_info;
+    ON_CALL(connection_info, subjectLocalCertificate()).WillByDefault(Return(""));
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(&connection_info));
+    EXPECT_EQ("-", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(nullptr));
+    StreamInfoFormatter upstream_format("DOWNSTREAM_LOCAL_SUBJECT");
+    EXPECT_EQ("-", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    StreamInfoFormatter upstream_format("DOWNSTREAM_PEER_SUBJECT");
+    NiceMock<Ssl::MockConnectionInfo> connection_info;
+    ON_CALL(connection_info, subjectPeerCertificate()).WillByDefault(Return("subject"));
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(&connection_info));
+    EXPECT_EQ("subject", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    StreamInfoFormatter upstream_format("DOWNSTREAM_PEER_SUBJECT");
+    NiceMock<Ssl::MockConnectionInfo> connection_info;
+    ON_CALL(connection_info, subjectPeerCertificate()).WillByDefault(Return(""));
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(&connection_info));
+    EXPECT_EQ("-", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    EXPECT_CALL(stream_info, downstreamSslConnection()).WillRepeatedly(Return(nullptr));
+    StreamInfoFormatter upstream_format("DOWNSTREAM_PEER_SUBJECT");
+    EXPECT_EQ("-", upstream_format.format(header, header, header, stream_info));
+  }
+  {
+    StreamInfoFormatter upstream_format("UPSTREAM_TRANSPORT_FAILURE_REASON");
+    std::string upstream_transport_failure_reason = "SSL error";
+    EXPECT_CALL(stream_info, upstreamTransportFailureReason())
+        .WillRepeatedly(ReturnRef(upstream_transport_failure_reason));
+    EXPECT_EQ("SSL error", upstream_format.format(header, header, header, stream_info));
+  }
+
+  {
+    StreamInfoFormatter upstream_format("UPSTREAM_TRANSPORT_FAILURE_REASON");
+    std::string upstream_transport_failure_reason;
+    EXPECT_CALL(stream_info, upstreamTransportFailureReason())
+        .WillRepeatedly(ReturnRef(upstream_transport_failure_reason));
     EXPECT_EQ("-", upstream_format.format(header, header, header, stream_info));
   }
 }
@@ -385,6 +499,13 @@ TEST(AccessLogFormatterTest, startTimeFormatter) {
 void verifyJsonOutput(std::string json_string,
                       std::unordered_map<std::string, std::string> expected_map) {
   const auto parsed = Json::Factory::loadFromString(json_string);
+
+  // Every json log line should have only one newline character, and it should be the last character
+  // in the string
+  const auto newline_pos = json_string.find('\n');
+  EXPECT_NE(newline_pos, std::string::npos);
+  EXPECT_EQ(newline_pos, json_string.length() - 1);
+
   for (const auto& pair : expected_map) {
     EXPECT_EQ(parsed->getString(pair.first), pair.second);
   }
@@ -411,6 +532,7 @@ TEST(AccessLogFormatterTest, JsonFormatterPlainStringTest) {
   verifyJsonOutput(formatter.format(request_header, response_header, response_trailer, stream_info),
                    expected_json_map);
 }
+
 TEST(AccessLogFormatterTest, JsonFormatterSingleOperatorTest) {
   StreamInfo::MockStreamInfo stream_info;
   Http::TestHeaderMapImpl request_header;
@@ -496,6 +618,7 @@ TEST(AccessLogFormatterTest, JsonFormatterDynamicMetadataTest) {
   envoy::api::v2::core::Metadata metadata;
   populateMetadataTestData(metadata);
   EXPECT_CALL(stream_info, dynamicMetadata()).WillRepeatedly(ReturnRef(metadata));
+  EXPECT_CALL(Const(stream_info), dynamicMetadata()).WillRepeatedly(ReturnRef(metadata));
 
   std::unordered_map<std::string, std::string> expected_json_map = {
       {"test_key", "\"test_value\""},
@@ -519,18 +642,13 @@ TEST(AccessLogFormatterTest, JsonFormatterStartTimeTest) {
   Http::TestHeaderMapImpl response_header;
   Http::TestHeaderMapImpl response_trailer;
 
-  time_t test_epoch = 1522280158;
-  SystemTime time = std::chrono::system_clock::from_time_t(test_epoch);
+  time_t expected_time_in_epoch = 1522280158;
+  SystemTime time = std::chrono::system_clock::from_time_t(expected_time_in_epoch);
   EXPECT_CALL(stream_info, startTime()).WillRepeatedly(Return(time));
-
-  // Needed to take into account the behavior in non-GMT timezones.
-  struct tm time_val;
-  gmtime_r(&test_epoch, &time_val);
-  time_t expected_time_t = mktime(&time_val);
 
   std::unordered_map<std::string, std::string> expected_json_map = {
       {"simple_date", "2018/03/28"},
-      {"test_time", fmt::format("{}", expected_time_t)},
+      {"test_time", fmt::format("{}", expected_time_in_epoch)},
       {"bad_format", "bad_format"},
       {"default", "2018-03-28T23:35:58.000Z"},
       {"all_zeroes", "000000000.0.00.000"}};
@@ -614,6 +732,7 @@ TEST(AccessLogFormatterTest, CompositeFormatterSuccess) {
     envoy::api::v2::core::Metadata metadata;
     populateMetadataTestData(metadata);
     EXPECT_CALL(stream_info, dynamicMetadata()).WillRepeatedly(ReturnRef(metadata));
+    EXPECT_CALL(Const(stream_info), dynamicMetadata()).WillRepeatedly(ReturnRef(metadata));
     const std::string format = "%DYNAMIC_METADATA(com.test:test_key)%|%DYNAMIC_METADATA(com.test:"
                                "test_obj)%|%DYNAMIC_METADATA(com.test:test_obj:inner_key)%";
     FormatterImpl formatter(format);
@@ -626,18 +745,13 @@ TEST(AccessLogFormatterTest, CompositeFormatterSuccess) {
     const std::string format = "%START_TIME(%Y/%m/%d)%|%START_TIME(%s)%|%START_TIME(bad_format)%|"
                                "%START_TIME%|%START_TIME(%f.%1f.%2f.%3f)%";
 
-    time_t test_epoch = 1522280158;
-    SystemTime time = std::chrono::system_clock::from_time_t(test_epoch);
+    time_t expected_time_in_epoch = 1522280158;
+    SystemTime time = std::chrono::system_clock::from_time_t(expected_time_in_epoch);
     EXPECT_CALL(stream_info, startTime()).WillRepeatedly(Return(time));
     FormatterImpl formatter(format);
 
-    // Needed to take into account the behavior in non-GMT timezones.
-    struct tm time_val;
-    gmtime_r(&test_epoch, &time_val);
-    time_t expected_time_t = mktime(&time_val);
-
     EXPECT_EQ(fmt::format("2018/03/28|{}|bad_format|2018-03-28T23:35:58.000Z|000000000.0.00.000",
-                          expected_time_t),
+                          expected_time_in_epoch),
               formatter.format(request_header, response_header, response_trailer, stream_info));
   }
 
@@ -679,7 +793,7 @@ TEST(AccessLogFormatterTest, CompositeFormatterSuccess) {
 
   {
     // This tests START_TIME specifier that has shorter segments when formatted, i.e.
-    // strftime("%%%%"") equals "%%", %1f will have 1 as its size.
+    // absl::FormatTime("%%%%"") equals "%%", %1f will have 1 as its size.
     const std::string format = "%START_TIME(%%%%|%%%%%f|%s%%%%%3f|%1f%%%%%s)%";
     const SystemTime start_time(std::chrono::microseconds(1522796769123456));
     EXPECT_CALL(stream_info, startTime()).WillOnce(Return(start_time));
@@ -721,5 +835,6 @@ TEST(AccessLogFormatterTest, ParserFailures) {
   }
 }
 
+} // namespace
 } // namespace AccessLog
 } // namespace Envoy

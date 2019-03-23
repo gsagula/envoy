@@ -7,11 +7,11 @@
 #include "common/config/filesystem_subscription_impl.h"
 #include "common/config/utility.h"
 #include "common/event/dispatcher_impl.h"
+#include "common/protobuf/utility.h"
 
 #include "test/common/config/subscription_test_harness.h"
 #include "test/mocks/config/mocks.h"
 #include "test/test_common/environment.h"
-#include "test/test_common/test_time.h"
 #include "test/test_common/utility.h"
 
 #include "gmock/gmock.h"
@@ -30,10 +30,15 @@ typedef FilesystemSubscriptionImpl<envoy::api::v2::ClusterLoadAssignment>
 class FilesystemSubscriptionTestHarness : public SubscriptionTestHarness {
 public:
   FilesystemSubscriptionTestHarness()
-      : path_(TestEnvironment::temporaryPath("eds.json")), dispatcher_(test_time_.timeSystem()),
-        subscription_(dispatcher_, path_, stats_) {}
+      : path_(TestEnvironment::temporaryPath("eds.json")),
+        api_(Api::createApiForTest(stats_store_)), dispatcher_(api_->allocateDispatcher()),
+        subscription_(*dispatcher_, path_, stats_, *api_) {}
 
-  ~FilesystemSubscriptionTestHarness() { EXPECT_EQ(0, ::unlink(path_.c_str())); }
+  ~FilesystemSubscriptionTestHarness() {
+    if (::access(path_.c_str(), F_OK) != -1) {
+      EXPECT_EQ(0, ::unlink(path_.c_str()));
+    }
+  }
 
   void startSubscription(const std::vector<std::string>& cluster_names) override {
     std::ifstream config_file(path_);
@@ -51,7 +56,7 @@ public:
     const std::string temp_path = TestEnvironment::writeStringToFileForTest("eds.json.tmp", json);
     TestUtility::renameFile(temp_path, path_);
     if (run_dispatcher) {
-      dispatcher_.run(Event::Dispatcher::RunType::NonBlock);
+      dispatcher_->run(Event::Dispatcher::RunType::NonBlock);
     }
   }
 
@@ -72,7 +77,7 @@ public:
     file_json.pop_back();
     file_json += "]}";
     envoy::api::v2::DiscoveryResponse response_pb;
-    EXPECT_TRUE(Protobuf::util::JsonStringToMessage(file_json, &response_pb).ok());
+    MessageUtil::loadFromJson(file_json, response_pb);
     EXPECT_CALL(callbacks_,
                 onConfigUpdate(
                     RepeatedProtoEq(
@@ -95,10 +100,28 @@ public:
                                          failure + (file_at_start_ ? 0 : 1), version);
   }
 
+  void expectConfigUpdateFailed() override {
+    // initial_fetch_timeout not implemented
+  }
+
+  void expectEnableInitFetchTimeoutTimer(std::chrono::milliseconds timeout) override {
+    UNREFERENCED_PARAMETER(timeout);
+    // initial_fetch_timeout not implemented
+  }
+
+  void expectDisableInitFetchTimeoutTimer() override {
+    // initial_fetch_timeout not implemented
+  }
+
+  void callInitFetchTimeoutCb() override {
+    // initial_fetch_timeout not implemented
+  }
+
   const std::string path_;
   std::string version_;
-  DangerousDeprecatedTestTime test_time_;
-  Event::DispatcherImpl dispatcher_;
+  Stats::IsolatedStoreImpl stats_store_;
+  Api::ApiPtr api_;
+  Event::DispatcherPtr dispatcher_;
   NiceMock<Config::MockSubscriptionCallbacks<envoy::api::v2::ClusterLoadAssignment>> callbacks_;
   FilesystemEdsSubscriptionImpl subscription_;
   bool file_at_start_{false};
