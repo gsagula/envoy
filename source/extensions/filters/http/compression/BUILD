@@ -26,7 +26,7 @@ envoy_cc_library(
         "//source/common/json:config_schemas_lib",
         "//source/common/json:json_validator_lib",
         "//source/common/protobuf",
-        "@envoy_api//envoy/config/filter/http/compression/v2:compression_cc",
+        "@envoy_api//envoy/config/filter/http/compression/v2alpha:compression_cc",
     ],
 )
 
