@@ -9,15 +9,10 @@ namespace Extensions {
 namespace HttpFilters {
 namespace Compression {
 
-
-CompressionFilterConfig::CompressionFilterConfig(const envoy::config::filter::http::compression::v2alpha::Compression&,
-                                   const std::string& stats_prefix, Stats::Scope& scope,
-                                   Runtime::Loader& runtime)
+CompressionFilterConfig::CompressionFilterConfig(
+    const envoy::config::filter::http::compression::v2alpha::Compression&,
+    const std::string& stats_prefix, Stats::Scope& scope, Runtime::Loader& runtime)
     : stats_(generateStats(stats_prefix + "compression.", scope)), runtime_(runtime) {}
-
-
-CompressionFilter::CompressionFilter(FilterConfigSharedPtr config)
-    : config_(config) {}
 
 Http::FilterHeadersStatus CompressionFilter::decodeHeaders(Http::HeaderMap&, bool) {
   return Http::FilterHeadersStatus::Continue;
@@ -34,3 +29,4 @@ Http::FilterDataStatus CompressionFilter::encodeData(Buffer::Instance&, bool) {
 } // namespace Compression
 } // namespace HttpFilters
 } // namespace Extensions
+} // namespace Envoy

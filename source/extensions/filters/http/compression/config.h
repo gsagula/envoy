@@ -14,15 +14,15 @@ namespace Compression {
 /**
  * Config registration for the compression filter. @see NamedHttpFilterConfigFactory.
  */
-class CompressionFilterFactory : public Common::FactoryBase<envoy::config::filter::http::compression::v2alpha::Compression> {
+class CompressionFilterFactory
+    : public Common::FactoryBase<envoy::config::filter::http::compression::v2alpha::Compression> {
 public:
-  CompressionFilterFactory() : FactoryBase(HttpFilterNames::get().EnvoyCompression) {}
+  CompressionFilterFactory() : FactoryBase(HttpFilterNames::get().Compression) {}
 
 private:
-  Http::FilterFactoryCb
-  createFilterFactoryFromProtoTyped(const envoy::config::filter::http::compression::v2alpha::Compression& config,
-                                    const std::string& stats_prefix,
-                                    Server::Configuration::FactoryContext& context) override;
+  Http::FilterFactoryCb createFilterFactoryFromProtoTyped(
+      const envoy::config::filter::http::compression::v2alpha::Compression& config,
+      const std::string& stats_prefix, Server::Configuration::FactoryContext& context) override;
 };
 
 } // namespace Compression

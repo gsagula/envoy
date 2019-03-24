@@ -58,7 +58,7 @@ struct CompressionStats {
 class CompressionFilterConfig {
 
 public:
-  CompressionFilterConfig(const envoy::config::filter::http::compression::v2Alpha::Compression& api,
+  CompressionFilterConfig(const envoy::config::filter::http::compression::v2alpha::Compression& api,
                   const std::string& stats_prefix,
                    Stats::Scope& scope, Runtime::Loader& runtime);
 
@@ -70,7 +70,7 @@ private:
     return CompressionStats{ALL_COMPRESSION_STATS(POOL_COUNTER_PREFIX(scope, prefix))};
   }
 
-  GzipStats stats_;
+  CompressionStats stats_;
   Runtime::Loader& runtime_;
 };
 
@@ -81,10 +81,10 @@ typedef std::shared_ptr<CompressionFilterConfig> CompressionFilterConfigSharedPt
  */
 class CompressionFilter : public Http::StreamFilter {
 public:
-  CompressionFilter(CompressionFilterConfigSharedPtr config);
+  CompressionFilter(CompressionFilterConfigSharedPtr config) : config_(config) {}
 
   // Http::StreamFilterBase
-  void onDestroy() override{};
+  void onDestroy() override {};
 
   // Http::StreamDecoderFilter
   Http::FilterHeadersStatus decodeHeaders(Http::HeaderMap& headers, bool end_stream) override;
@@ -107,12 +107,15 @@ public:
   Http::FilterTrailersStatus encodeTrailers(Http::HeaderMap&) override {
     return Http::FilterTrailersStatus::Continue;
   }
+  Http::FilterMetadataStatus encodeMetadata(Http::MetadataMap&) override {
+    return Http::FilterMetadataStatus::Continue;
+  }
   void setEncoderFilterCallbacks(Http::StreamEncoderFilterCallbacks& callbacks) override {
     encoder_callbacks_ = &callbacks;
   }
 
 private:
-  FilterConfigSharedPtr config_;
+  CompressionFilterConfigSharedPtr config_;
   Http::StreamDecoderFilterCallbacks* decoder_callbacks_{nullptr};
   Http::StreamEncoderFilterCallbacks* encoder_callbacks_{nullptr};
 };

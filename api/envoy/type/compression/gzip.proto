@@ -1,50 +1,54 @@
 syntax = "proto3";
 
 package envoy.type.compression;
+
+option java_package = "io.envoyproxy.envoy.type.compression";
+option java_outer_classname = "GzipProto";
+option java_multiple_files = true;
 option go_package = "compression";
 
 import "validate/validate.proto";
 
 message Gzip {
-    // Value from 1 to 9 that controls the amount of internal memory used by zlib. Higher values
-    // use more memory, but are faster and produce better compression results. The default value is 5.
-    uint32 memory_level = 1 [(validate.rules).uint32 = {gte: 1, lte: 9}];
+  // Value from 1 to 9 that controls the amount of internal memory used by zlib. Higher values
+  // use more memory, but are faster and produce better compression results. The default value is 5.
+  uint32 memory_level = 1 [(validate.rules).uint32 = {gte: 1, lte: 9}];
 
-    message Level {
-      enum Enum {
-        NORMAL = 0;
-        MEDIUM = 1;
-        HIGH = 2;
-      }
+  message Level {
+    enum Enum {
+      NORMAL = 0;
+      MEDIUM = 1;
+      HIGH = 2;
     }
+  }
 
-    // A value used for selecting the zlib compression level. This setting will affect speed and
-    // amount of compression applied to the content. "BEST" provides higher compression at the cost of
-    // higher latency, "SPEED" provides lower compression with minimum impact on response time.
-    // "DEFAULT" provides an optimal result between speed and compression. This field will be set to
-    // "DEFAULT" if not specified.
-    Level.Enum level = 2 [(validate.rules).enum.defined_only = true];
+  // A value used for selecting the zlib compression level. This setting will affect speed and
+  // amount of compression applied to the content. "BEST" provides higher compression at the cost of
+  // higher latency, "SPEED" provides lower compression with minimum impact on response time.
+  // "DEFAULT" provides an optimal result between speed and compression. This field will be set to
+  // "DEFAULT" if not specified.
+  Level.Enum level = 2 [(validate.rules).enum.defined_only = true];
 
-    message Strategy {
-      enum Enum {
-        DEFAULT = 0;
-        FILTERED = 1;
-        HUFFMAN = 2;
-        RLE = 3;
-      }
+  message Strategy {
+    enum Enum {
+      DEFAULT = 0;
+      FILTERED = 1;
+      HUFFMAN = 2;
+      RLE = 3;
     }
+  }
 
-    // A value used for selecting the zlib compression strategy which is directly related to the
-    // characteristics of the content. Most of the time "DEFAULT" will be the best choice, though
-    // there are situations which changing this parameter might produce better results. For example,
-    // run-length encoding (RLE) is typically used when the content is known for having sequences
-    // which same data occurs many consecutive times. For more information about each strategy, please
-    // refer to zlib manual.
-    Strategy.Enum strategy = 3 [(validate.rules).enum.defined_only = true];
+  // A value used for selecting the zlib compression strategy which is directly related to the
+  // characteristics of the content. Most of the time "DEFAULT" will be the best choice, though
+  // there are situations which changing this parameter might produce better results. For example,
+  // run-length encoding (RLE) is typically used when the content is known for having sequences
+  // which same data occurs many consecutive times. For more information about each strategy, please
+  // refer to zlib manual.
+  Strategy.Enum strategy = 3 [(validate.rules).enum.defined_only = true];
 
-    // Value from 9 to 15 that represents the base two logarithmic of the compressor's window size.
-    // Larger window results in better compression at the expense of memory usage. The default is 12
-    // which will produce a 4096 bytes window. For more details about this parameter, please refer to
-    // zlib manual > deflateInit2.
-    uint32 window = 4 [(validate.rules).uint32 = {gte: 9, lte: 15}];
+  // Value from 9 to 15 that represents the base two logarithmic of the compressor's window size.
+  // Larger window results in better compression at the expense of memory usage. The default is 12
+  // which will produce a 4096 bytes window. For more details about this parameter, please refer to
+  // zlib manual > deflateInit2.
+  uint32 window = 4 [(validate.rules).uint32 = {gte: 9, lte: 15}];
 }

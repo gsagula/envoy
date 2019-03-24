@@ -26,3 +26,17 @@ message DoubleMatcher {
     double exact = 2;
   }
 }
+
+// Specifies the way to match a unsigned integer value.
+message UintMatcher {
+  oneof match_pattern {
+    option (validate.required) = true;
+
+    // If specified, the input unsigned integer value must be in the range specified here.
+    // Note: The range is using half-open interval semantics [start, end).
+    envoy.type.Int64Range range = 1;
+
+    // If specified, the input unsigned integer value must be equal to the value specified here.
+    uint64 exact = 2;
+  }
+}

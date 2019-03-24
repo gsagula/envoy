@@ -17,7 +17,7 @@ public:
   // CORS filter
   const std::string Cors = "envoy.cors";
   // Compression filter
-  const std::string Compression = "envoy.compression";
+  const std::string Compression = "envoy.filters.http.compression";
   // Dynamo filter
   const std::string Dynamo = "envoy.http_dynamo_filter";
   // Fault filter
