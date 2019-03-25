@@ -1,13 +1,15 @@
 syntax = "proto3";
 
-package envoy.type.compression;
+package envoy.type;
 
-option java_package = "io.envoyproxy.envoy.type.compression";
 option java_outer_classname = "GzipProto";
 option java_multiple_files = true;
-option go_package = "compression";
+option java_package = "io.envoyproxy.envoy.type";
+option go_package = "envoy_type";
 
 import "validate/validate.proto";
+
+// [#protodoc-title: Gzip]
 
 message Gzip {
   // Value from 1 to 9 that controls the amount of internal memory used by zlib. Higher values

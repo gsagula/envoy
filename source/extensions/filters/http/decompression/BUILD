@@ -1,7 +1,7 @@
 licenses(["notice"])  # Apache 2
 
-# HTTP L7 filter that performs data compression
-# Public docs: docs/root/configuration/http_filters/compression_filter.rst
+# HTTP L7 filter that performs data decompression
+# Public docs: docs/root/configuration/http_filters/decompression_filter.rst
 
 load(
     "//bazel:envoy_build_system.bzl",
@@ -12,9 +12,9 @@ load(
 envoy_package()
 
 envoy_cc_library(
-    name = "compression_filter_lib",
-    srcs = ["compression_filter.cc"],
-    hdrs = ["compression_filter.h"],
+    name = "decompression_filter_lib",
+    srcs = ["decompression_filter.cc"],
+    hdrs = ["decompression_filter.h"],
     deps = [
         "//include/envoy/http:filter_interface",
         "//include/envoy/json:json_object_interface",
@@ -26,7 +26,7 @@ envoy_cc_library(
         "//source/common/json:config_schemas_lib",
         "//source/common/json:json_validator_lib",
         "//source/common/protobuf",
-        "@envoy_api//envoy/config/filter/http/compression/v2alpha:compression_cc",
+        "@envoy_api//envoy/config/filter/http/decompression/v2alpha:decompression_cc",
     ],
 )
 
@@ -38,15 +38,15 @@ envoy_cc_library(
         "//include/envoy/registry",
         "//source/extensions/filters/http:well_known_names",
         "//source/extensions/filters/http/common:factory_base_lib",
-        "//source/extensions/filters/http/compression:compression_filter_lib",
+        "//source/extensions/filters/http/decompression:decompression_filter_lib",
     ],
 )
 
 envoy_cc_library(
-    name = "compression_policy_lib",
-    srcs = ["compression_policy.cc"],
-    hdrs = ["compression_policy.h"],
+    name = "decompression_policy_lib",
+    srcs = ["decompression_policy.cc"],
+    hdrs = ["decompression_policy.h"],
     deps = [
-        "@envoy_api//envoy/config/filter/http/compression/v2alpha:compression_cc",
+        "@envoy_api//envoy/config/filter/http/decompression/v2alpha:compression_cc",
     ],
 )

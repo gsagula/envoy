@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package envoy.config.filter.http.decompression.v2alpha;
+
+option java_outer_classname = "CompressionProto";
+option java_package = "io.envoyproxy.envoy.config.filter.http.decompression.v2alpha";
+option java_multiple_files = true;
+option go_package = "v2alpha";
+
+import "envoy/type/gzip.proto";
+import "envoy/type/matcher/string.proto";
+import "envoy/type/matcher/number.proto";
+
+import "google/protobuf/wrappers.proto";
+import "validate/validate.proto";
+import "gogoproto/gogo.proto";
+
+// [#protodoc-title: Decompression]
+
+message Decompression {
+  message Decoder {
+    // Configure policies for handling decompression.
+    repeated Policy policies = 1;
+  }
+  
+  message Encoder {
+    // Configure policies for handling decompression.
+    repeated Policy policies = 1;
+  }
+
+  message Policy {  
+    // Configures the decompression type algorithm.
+    DecompressionType decompression_type = 1;
+  
+    // When supplied, it evaluate the Content-Length header for a match.
+    envoy.type.matcher.UintMatcher content_length = 2;
+  }
+
+  message DecompressionType {
+    oneof config {
+      // Settings for Gzip decompression algorithm.
+      envoy.type.Gzip gzip = 1;
+
+      // Other algorithm configurations go here..
+    }
+  }
+}

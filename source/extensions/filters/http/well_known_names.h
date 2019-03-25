@@ -16,8 +16,6 @@ public:
   const std::string Buffer = "envoy.buffer";
   // CORS filter
   const std::string Cors = "envoy.cors";
-  // Compression filter
-  const std::string Compression = "envoy.filters.http.compression";
   // Dynamo filter
   const std::string Dynamo = "envoy.http_dynamo_filter";
   // Fault filter
@@ -54,6 +52,10 @@ public:
   const std::string HeaderToMetadata = "envoy.filters.http.header_to_metadata";
   // Tap filter
   const std::string Tap = "envoy.filters.http.tap";
+  // Compression filter
+  const std::string Compression = "envoy.filters.http.compression";
+  // Decompression filter
+  const std::string Decompression = "envoy.filters.http.decompression";
 
   // Converts names from v1 to v2
   const Config::V1Converter v1_converter_;

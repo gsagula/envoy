@@ -26,6 +26,7 @@ EXTENSIONS = {
     "envoy.filters.http.buffer":                        "//source/extensions/filters/http/buffer:config",
     "envoy.filters.http.cors":                          "//source/extensions/filters/http/cors:config",
     "envoy.filters.http.compression":                   "//source/extensions/filters/http/compression:config",
+    "envoy.filters.http.decompression":                 "//source/extensions/filters/http/decompression:config",
     "envoy.filters.http.dynamo":                        "//source/extensions/filters/http/dynamo:config",
     "envoy.filters.http.ext_authz":                     "//source/extensions/filters/http/ext_authz:config",
     "envoy.filters.http.fault":                         "//source/extensions/filters/http/fault:config",
@@ -151,6 +152,7 @@ WINDOWS_EXTENSIONS = {
 
     #"envoy.filters.http.buffer":                        "//source/extensions/filters/http/buffer:config",
     #"envoy.filters.http.compression":                   "//source/extensions/filters/http/compression:config",
+    #"envoy.filters.http.decompression":                 "//source/extensions/filters/http/decompression:config",
     #"envoy.filters.http.cors":                          "//source/extensions/filters/http/cors:config",
     #"envoy.filters.http.dynamo":                        "//source/extensions/filters/http/dynamo:config",
     #"envoy.filters.http.ext_authz":                     "//source/extensions/filters/http/ext_authz:config",

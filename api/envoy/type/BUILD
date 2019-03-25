@@ -34,3 +34,9 @@ api_go_proto_library(
     name = "range",
     proto = ":range",
 )
+
+api_proto_library_internal(
+    name = "gzip",
+    srcs = ["gzip.proto"],
+    visibility = ["//visibility:public"],
+)
