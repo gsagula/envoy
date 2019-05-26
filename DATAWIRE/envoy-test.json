@@ -1,0 +1,116 @@
+{
+  "listeners": [
+    {
+      "address": "tcp://0.0.0.0:9999",
+      "use_original_dst": true,
+      "filters": [
+        {
+          "type": "read",
+          "name": "http_connection_manager",
+          "config": {
+            "codec_type": "auto",
+            "stat_prefix": "ingress_http",
+            "access_log": [
+              {
+                "path": "/tmp/access_log"
+              }
+            ],
+            "route_config": {
+              "virtual_hosts": [
+                {
+                  "name": "api_gateway",
+                  "domains": ["*"],
+                  "routes": [
+                    {
+                      "prefix": "/nohdr/",
+                      "headers": [
+                        { "name": "x-hurkle" }
+                      ],
+                      "cluster": "httpbin",
+                      "auto_host_rewrite": true,
+                      "prefix_rewrite": "/"
+                    },
+                    {
+                      "prefix": "/bad1/",
+                      "cluster": "httpbin",
+                      "auto_host_rewrite": true,
+                      "prefix_rewrite": "/"
+                    },
+                    {
+                      "prefix": "/bad2/",
+                      "headers": [
+                        { "name": "x-hurkle" }
+                      ],
+                      "cluster": "httpbin",
+                      "auto_host_rewrite": true,
+                      "prefix_rewrite": "/"
+                    },
+                    {
+                      "prefix": "/good/",
+                      "headers": [
+                        { "name": "x-hurkle" }
+                      ],
+                      "cluster": "httpbin",
+                      "auto_host_rewrite": true,
+                      "prefix_rewrite": "/"
+                    }
+                  ]
+                }
+              ]
+            },
+            "filters": [
+              {
+                "type": "decoder",
+                "name": "extauth",
+                "config": {
+                  "cluster": "auth",
+                  "timeout_ms": 5000,
+                  "path_prefix": "authtest",
+                  "allowed_headers": [
+                    "x-auth-test", "x-hurkle"
+                  ]
+                }
+              },
+              {
+                "type": "decoder",
+                "name": "router",
+                "config": {}
+              }
+            ]
+          }
+        }
+      ]
+    }],
+
+  "admin": {
+    "access_log_path": "/dev/null",
+    "address": "tcp://0.0.0.0:8001"
+  },
+
+  "cluster_manager": {
+    "clusters": [
+      {
+        "name": "httpbin",
+        "type": "logical_dns",
+        "connect_timeout_ms": 5000,
+        "lb_type": "random",
+        "hosts": [
+          {
+            "url": "tcp://httpbin.org:80"
+          }
+        ]
+      },
+      {
+        "name": "auth",
+        "type": "logical_dns",
+        "connect_timeout_ms": 5000,
+        "lb_type": "random",
+        "hosts": [
+          {
+            "url": "tcp://docker.for.mac.localhost:3000"
+          }
+        ]
+      }
+    ]
+  }
+}

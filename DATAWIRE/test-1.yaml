@@ -1,0 +1,22 @@
+iterations: 100
+tests:
+- name: Failing 1
+  path: /bad1/
+  expect: 403
+
+- name: Failing 2
+  path: /bad2/
+  expect: 403
+
+- name: Auth but no header
+  path: /nohdr/
+  expect: 404
+
+- name: Auth and header
+  path: /good/
+  expect: 200
+
+- name: Auth with HEAD method 
+  method: head
+  path: /good/
+  expect: 200
