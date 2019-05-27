@@ -16,6 +16,7 @@ cd "$ROOT"
 [[ -z "${ENVOY_DOCKER_BUILD_DIR}" ]] && ENVOY_DOCKER_BUILD_DIR=/tmp/envoy-docker-build
 # --
 
+docker rm -f envoy-build
 docker pull "${IMAGE_NAME}":"${IMAGE_ID}"
 
 echo 'Now you can run /xfer/DATAWIRE/go.sh to copy, rebuild, and run Envoy'
