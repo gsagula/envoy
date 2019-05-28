@@ -5,7 +5,7 @@ REGISTRY=${1:-datawire}
 
 for combo in ubuntu-unstripped alpine-unstripped alpine-stripped; do
     dockerfile="Dockerfile-$combo"
-    basetag="ambassador-envoy-$combo:$VERSION"
+    basetag=latest   # "ambassador-envoy-$combo:$VERSION"
     tag="$basetag"
 
     if [ "$REGISTRY" != "-" ]; then

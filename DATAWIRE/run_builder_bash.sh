@@ -21,5 +21,5 @@ docker pull "${IMAGE_NAME}":"${IMAGE_ID}"
 
 echo 'Now you can run /xfer/DATAWIRE/go.sh to copy, rebuild, and run Envoy'
 
-docker run --privileged -it -u 0:0 -p 9999:9999 -p 8001:8001 -v "$(pwd):/xfer" --name envoy-build \
+docker run --privileged -it -u 0:0 -p 8443:8443 -p 8001:8001 -v "$(pwd):/xfer" --name envoy-build \
     "${IMAGE_NAME}":"${IMAGE_ID}" /bin/bash

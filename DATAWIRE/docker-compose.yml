@@ -1,0 +1,18 @@
+version: '2'
+services:
+
+  # curl -v http://localhost:61443/echo/get
+  envoy:
+    build:
+      context: .
+      dockerfile: Dockerfile-proxy
+    volumes:
+      - ./config.yaml:/etc/config.yaml
+    networks:
+      - ambassador
+    ports:
+      - "61801:8001"
+      - "61443:8443"
+
+networks:
+  ambassador: {}

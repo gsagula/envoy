@@ -1,0 +1,6 @@
+FROM quay.io/gsagula/ambassador-envoy-alpine-stripped:v1.3.0-3504-g0092111a3
+
+ADD cert.pem /etc/cert.pem
+ADD key.pem /etc/key.pem
+
+CMD ["/usr/local/bin/envoy", "-c", "/etc/config.yaml", "-l", "trace"]
